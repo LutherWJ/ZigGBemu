@@ -37,13 +37,4 @@ pub fn build(b: *std.Build) void {
 
     const run_cpu_tests = b.addRunArtifact(cpu_tests);
     test_step.dependOn(&run_cpu_tests.step);
-
-    // You can add more test files like this:
-    // const memory_tests = b.addTest(.{
-    //     .root_source_file = b.path("test/memory_test.zig"),
-    //     .target = target,
-    //     .optimize = optimize,
-    // });
-    // const run_memory_tests = b.addRunArtifact(memory_tests);
-    // test_step.dependOn(&run_memory_tests.step);
 }

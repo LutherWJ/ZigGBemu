@@ -78,7 +78,7 @@ pub const CPU = struct {
     fn ld_hlplus_a(self: *CPU) void {
         const address = self.getHL();
         self.memory[address] = self.a;
-        self.setHL(getHL() + 1);
+        self.setHL(self.getHL() + 1);
     }
 
     fn ld_h_d8(self: *CPU) void {
@@ -88,7 +88,8 @@ pub const CPU = struct {
 
     fn ld_a_hlplus(self: *CPU) void {
         const address = self.getHL();
-        self.a = self.memory[address] + 1;
+        self.a = self.memory[address];
+        self.setHL(self.getHL() + 1);
     }
 
     fn ld_l_d8(self: *CPU) void {
@@ -99,66 +100,56 @@ pub const CPU = struct {
     fn ld_hlminus_a(self: *CPU) void {
         const address = self.getHL();
         self.memory[address] = self.a;
-        self.setHL(getHL() - 1);
+        self.setHL(self.getHL() - 1);
     }
 
     fn ld_a_hlminus(self: *CPU) void {
         const address = self.getHL();
-        self.a = self.memory[address] - 1;
+        self.a = self.memory[address];
+        self.setHL(self.getHL() - 1);
     }
 
     fn inc_bc(self: *CPU) void {
-        if ((self.b & 0x0F) == 0) {
-            self.setHFlag();
-        } else {
-            self.unsetHFlag();
-        }
-
         self.setBC(self.getBC() + 1);
-
-        if (self.b == 0) {
-            self.setZFlag();
-        } else {
-            self.unsetZFlag();
-        }
-        self.unsetNFlag();
     }
 
     fn inc_b(self: *CPU) void {
-        self.b += 1;
+        self.unsetNFlag();
+        self.b +%= 1;
+        self.checkZFlag(&self.b);
+        self.checkHFlag(&self.b);
     }
 
     fn dec_b(self: *CPU) void {
-        if ((self.b & 0x0F) == 0) {
-            self.setHFlag();
-        } else {
-            self.unsetHFlag();
-        }
-
-        self.b -= 1;
-
-        if (self.b == 0) {
-            self.setZFlag();
-        } else {
-            self.unsetZFlag();
-        }
         self.setNFlag();
+        self.checkHFlag(&self.b);
+        self.b -%= 1;
+        self.checkZFlag(&self.b);
     }
 
-    fn add_hl_bc(self: *CPU) void { // TODO NOT FINISHED IMPLEMENTING FLAGS
-        if ((self.l & 0x0F) == 0) {
+    fn add_hl_bc(self: *CPU) void {
+        self.unsetNFlag();
+        const hl = self.getHL();
+        const bc = self.getBC();
+        const result = hl +% bc;
+
+        if (result < hl) {
+            self.setCFlag();
+        } else {
+            self.unsetCFlag();
+        }
+
+        if ((hl & 0x0FFF) + (bc & 0x0FFF) > 0x0FFF) {
             self.setHFlag();
         } else {
             self.unsetHFlag();
         }
 
-        self.setHL(self.getHL() + self.getBC());
-
-        self.unsetCflag();
+        self.setHL(result);
     }
 
     fn dec_bc(self: *CPU) void {
-        self.setBC(self.getBC() + 1);
+        self.setBC(self.getBC() -% 1);
     }
 
     fn unknown_opcode(self: *CPU) void {
@@ -166,7 +157,7 @@ pub const CPU = struct {
         @panic("Unknown opcode");
     }
 
-    // Helper functions so I don't typo
+    // Helper functions
     fn getBC(self: *CPU) u16 {
         return (@as(u16, self.b) << 8) | self.c;
     }
@@ -225,6 +216,30 @@ pub const CPU = struct {
     fn unsetCFlag(self: *CPU) void {
         self.f &= ~(@as(u8, 1) << 4);
     }
+
+    fn checkZFlag(self: *CPU, reg: *u8) void {
+        if (reg.* == 0) {
+            self.setZFlag();
+        } else {
+            self.unsetZFlag();
+        }
+    }
+
+    fn checkHFlag(self: *CPU, reg: *u8) void {
+        if ((reg.* & 0x0F) == 0) {
+            self.setHFlag();
+        } else {
+            self.unsetHFlag();
+        }
+    }
+
+    fn checkCFlag(self: *CPU, reg: *u8) void {
+        if (reg.* == 0) {
+            self.setCFlag();
+        } else {
+            self.unsetCFlag();
+        }
+    }
 };
 
 // Instruction table matching opcodes to their corresponding functions
@@ -233,12 +248,23 @@ const instruction_table = blk: {
     table[0x00] = CPU.nop;
     table[0x01] = CPU.ld_bc_d16;
     table[0x02] = CPU.ld_bc_a;
+    table[0x03] = CPU.inc_bc;
+    table[0x04] = CPU.inc_b;
+    table[0x05] = CPU.dec_b;
     table[0x06] = CPU.ld_b_d8;
+    table[0x09] = CPU.add_hl_bc;
     table[0x0A] = CPU.ld_a_bc;
+    table[0x0B] = CPU.dec_bc;
     table[0x0E] = CPU.ld_c_d8;
     table[0x12] = CPU.ld_de_a;
     table[0x16] = CPU.ld_d_d8;
     table[0x1A] = CPU.ld_a_de;
     table[0x1E] = CPU.ld_e_d8;
+    table[0x22] = CPU.ld_hlplus_a;
+    table[0x26] = CPU.ld_h_d8;
+    table[0x2A] = CPU.ld_a_hlplus;
+    table[0x2E] = CPU.ld_l_d8;
+    table[0x32] = CPU.ld_hlminus_a;
+    table[0x3A] = CPU.ld_a_hlminus;
     break :blk table;
 };
