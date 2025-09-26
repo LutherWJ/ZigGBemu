@@ -1,0 +1,4 @@
+zig-out/
+.idea/
+.zig-cache/
+ZigGBemu.iml
