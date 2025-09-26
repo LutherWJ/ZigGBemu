@@ -21,7 +21,7 @@ test "LD (BC), A instruction" {
     try c.step();
 
     try std.testing.expectEqual(@as(u8, 0x42), c.memory[0x8000]);
-    try std.testing.expectEqual(@as(u16, 2), c.pc);
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
 }
 
 test "LD B, n instruction" {
@@ -45,7 +45,7 @@ test "LD (DE), A instruction" {
     try c.step();
 
     try std.testing.expectEqual(@as(u8, 0x55), c.memory[0x9010]);
-    try std.testing.expectEqual(@as(u16, 2), c.pc);
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
 }
 
 test "LD BC, d16 instruction" {

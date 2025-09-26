@@ -2,3 +2,4 @@ zig-out/
 .idea/
 .zig-cache/
 ZigGBemu.iml
+CLAUDE.md
