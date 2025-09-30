@@ -356,3 +356,580 @@ test "LD A, (HL-) instruction" {
     try std.testing.expectEqual(@as(u8, 0x0F), c.l);
     try std.testing.expectEqual(@as(u16, 1), c.pc);
 }
+
+test "RLA instruction - basic rotation with carry=0, bit7=0" {
+    var c = cpu.CPU{};
+    c.a = 0b01010101; // 0x55
+    c.f = 0b00000000; // All flags clear, carry = 0
+    c.memory[0] = 0x17;
+
+    try c.step();
+
+    // A should be rotated left with carry (0) inserted at bit 0
+    try std.testing.expectEqual(@as(u8, 0b10101010), c.a); // 0xAA
+    // Flags: Z=0, N=0, H=0, C=0 (old bit 7 was 0)
+    try std.testing.expectEqual(@as(u8, 0b00000000), c.f);
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
+}
+
+test "RLA instruction - rotation with carry=1, bit7=0" {
+    var c = cpu.CPU{};
+    c.a = 0b01010101; // 0x55
+    c.f = 0b00010000; // Carry flag set (bit 4), other flags clear
+    c.memory[0] = 0x17;
+
+    try c.step();
+
+    // A should be rotated left with old carry (1) inserted at bit 0
+    try std.testing.expectEqual(@as(u8, 0b10101011), c.a); // 0xAB
+    // Flags: Z=0, N=0, H=0, C=0 (old bit 7 was 0)
+    try std.testing.expectEqual(@as(u8, 0b00000000), c.f);
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
+}
+
+test "RLA instruction - rotation with carry=0, bit7=1" {
+    var c = cpu.CPU{};
+    c.a = 0b10110010; // 0xB2
+    c.f = 0b00000000; // All flags clear, carry = 0
+    c.memory[0] = 0x17;
+
+    try c.step();
+
+    // A should be rotated left with carry (0) inserted at bit 0
+    try std.testing.expectEqual(@as(u8, 0b01100100), c.a); // 0x64
+    // Flags: Z=0, N=0, H=0, C=1 (old bit 7 was 1)
+    try std.testing.expectEqual(@as(u8, 0b00010000), c.f);
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
+}
+
+test "RLA instruction - rotation with carry=1, bit7=1" {
+    var c = cpu.CPU{};
+    c.a = 0b10110010; // 0xB2
+    c.f = 0b00010000; // Carry flag set (bit 4)
+    c.memory[0] = 0x17;
+
+    try c.step();
+
+    // A should be rotated left with old carry (1) inserted at bit 0
+    try std.testing.expectEqual(@as(u8, 0b01100101), c.a); // 0x65
+    // Flags: Z=0, N=0, H=0, C=1 (old bit 7 was 1)
+    try std.testing.expectEqual(@as(u8, 0b00010000), c.f);
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
+}
+
+test "RLA instruction - all flags cleared except carry" {
+    var c = cpu.CPU{};
+    c.a = 0b10000000; // 0x80
+    c.f = 0b11110000; // All flags set (Z=1, N=1, H=1, C=1)
+    c.memory[0] = 0x17;
+
+    try c.step();
+
+    // A should be rotated left with old carry (1) inserted at bit 0
+    try std.testing.expectEqual(@as(u8, 0b00000001), c.a); // 0x01
+    // Flags: Z=0, N=0, H=0, C=1 (old bit 7 was 1) - Z, N, H must be cleared!
+    try std.testing.expectEqual(@as(u8, 0b00010000), c.f);
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
+}
+
+test "RLA instruction - edge case with 0x00" {
+    var c = cpu.CPU{};
+    c.a = 0x00;
+    c.f = 0b00000000; // Carry = 0
+    c.memory[0] = 0x17;
+
+    try c.step();
+
+    try std.testing.expectEqual(@as(u8, 0x00), c.a);
+    // Flags: Z=0 (always), N=0, H=0, C=0
+    try std.testing.expectEqual(@as(u8, 0b00000000), c.f);
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
+}
+
+test "RLA instruction - edge case with 0xFF" {
+    var c = cpu.CPU{};
+    c.a = 0xFF;
+    c.f = 0b00010000; // Carry = 1
+    c.memory[0] = 0x17;
+
+    try c.step();
+
+    try std.testing.expectEqual(@as(u8, 0xFF), c.a); // Rotates to 0xFF again with carry=1
+    // Flags: Z=0, N=0, H=0, C=1 (old bit 7 was 1)
+    try std.testing.expectEqual(@as(u8, 0b00010000), c.f);
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
+}
+
+test "RLA instruction - multiple rotations in sequence" {
+    var c = cpu.CPU{};
+    c.a = 0b10000000; // 0x80
+    c.f = 0b00000000; // Carry = 0
+    c.memory[0] = 0x17;
+    c.memory[1] = 0x17;
+
+    // First rotation
+    try c.step();
+    try std.testing.expectEqual(@as(u8, 0b00000000), c.a); // 0x00
+    try std.testing.expectEqual(@as(u8, 0b00010000), c.f); // C=1
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
+
+    // Second rotation
+    try c.step();
+    try std.testing.expectEqual(@as(u8, 0b00000001), c.a); // 0x01
+    try std.testing.expectEqual(@as(u8, 0b00000000), c.f); // C=0
+    try std.testing.expectEqual(@as(u16, 2), c.pc);
+}
+
+// ============================================================================
+// RLCA (0x07) - Rotate Left Circular Accumulator Tests
+// Specification: Rotate A left. Old bit 7 to Carry flag and bit 0.
+// Flags: Z=0, N=0, H=0, C=bit7
+// ============================================================================
+
+test "RLCA instruction - basic rotation with bit7=0" {
+    var c = cpu.CPU{};
+    c.a = 0b01010101; // 0x55
+    c.f = 0b11110000; // All flags set initially
+    c.memory[0] = 0x07;
+
+    try c.step();
+
+    // A should be rotated left, bit 7 (0) moves to bit 0 and carry
+    try std.testing.expectEqual(@as(u8, 0b10101010), c.a); // 0xAA
+    // Flags: Z=0 (always), N=0 (always), H=0 (always), C=0 (old bit 7)
+    try std.testing.expectEqual(@as(u8, 0b00000000), c.f);
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
+}
+
+test "RLCA instruction - rotation with bit7=1" {
+    var c = cpu.CPU{};
+    c.a = 0b10110010; // 0xB2
+    c.f = 0b00000000; // All flags clear initially
+    c.memory[0] = 0x07;
+
+    try c.step();
+
+    // A should be rotated left, bit 7 (1) moves to bit 0 and carry
+    try std.testing.expectEqual(@as(u8, 0b01100101), c.a); // 0x65
+    // Flags: Z=0, N=0, H=0, C=1 (old bit 7 was 1)
+    try std.testing.expectEqual(@as(u8, 0b00010000), c.f);
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
+}
+
+test "RLCA instruction - edge case with 0x00" {
+    var c = cpu.CPU{};
+    c.a = 0x00;
+    c.f = 0b11110000; // All flags set
+    c.memory[0] = 0x07;
+
+    try c.step();
+
+    try std.testing.expectEqual(@as(u8, 0x00), c.a);
+    // Flags: Z=0 (always 0 for RLCA), N=0, H=0, C=0
+    try std.testing.expectEqual(@as(u8, 0b00000000), c.f);
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
+}
+
+test "RLCA instruction - edge case with 0xFF" {
+    var c = cpu.CPU{};
+    c.a = 0xFF;
+    c.f = 0b00000000; // All flags clear
+    c.memory[0] = 0x07;
+
+    try c.step();
+
+    try std.testing.expectEqual(@as(u8, 0xFF), c.a); // All bits rotate
+    // Flags: Z=0, N=0, H=0, C=1 (bit 7 was 1)
+    try std.testing.expectEqual(@as(u8, 0b00010000), c.f);
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
+}
+
+test "RLCA instruction - edge case with 0x80" {
+    var c = cpu.CPU{};
+    c.a = 0x80; // Only bit 7 set
+    c.f = 0b00000000;
+    c.memory[0] = 0x07;
+
+    try c.step();
+
+    // Bit 7 moves to bit 0
+    try std.testing.expectEqual(@as(u8, 0x01), c.a);
+    // Flags: Z=0, N=0, H=0, C=1
+    try std.testing.expectEqual(@as(u8, 0b00010000), c.f);
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
+}
+
+test "RLCA instruction - edge case with 0x01" {
+    var c = cpu.CPU{};
+    c.a = 0x01; // Only bit 0 set
+    c.f = 0b00010000; // Carry set (should be ignored)
+    c.memory[0] = 0x07;
+
+    try c.step();
+
+    // Bit 7 is 0, so it moves to bit 0 (result is 0x02)
+    try std.testing.expectEqual(@as(u8, 0x02), c.a);
+    // Flags: Z=0, N=0, H=0, C=0 (bit 7 was 0)
+    try std.testing.expectEqual(@as(u8, 0b00000000), c.f);
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
+}
+
+test "RLCA instruction - multiple rotations bring back original" {
+    var c = cpu.CPU{};
+    c.a = 0b10110010; // 0xB2
+    c.f = 0b00000000;
+    c.memory[0] = 0x07;
+    c.memory[1] = 0x07;
+    c.memory[2] = 0x07;
+    c.memory[3] = 0x07;
+    c.memory[4] = 0x07;
+    c.memory[5] = 0x07;
+    c.memory[6] = 0x07;
+    c.memory[7] = 0x07;
+
+    // After 8 rotations, should return to original value
+    for (0..8) |_| {
+        try c.step();
+    }
+
+    try std.testing.expectEqual(@as(u8, 0b10110010), c.a); // Back to 0xB2
+    try std.testing.expectEqual(@as(u16, 8), c.pc);
+}
+
+test "RLCA instruction - clears Z flag even if result is 0x00" {
+    var c = cpu.CPU{};
+    c.a = 0x00;
+    c.f = 0b10000000; // Z flag set
+    c.memory[0] = 0x07;
+
+    try c.step();
+
+    // RLCA always clears Z flag (unlike CB prefix rotates)
+    try std.testing.expectEqual(@as(u8, 0x00), c.a);
+    try std.testing.expectEqual(@as(u8, 0b00000000), c.f); // Z must be 0
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
+}
+
+// ============================================================================
+// RRCA (0x0F) - Rotate Right Circular Accumulator Tests
+// Specification: Rotate A right. Old bit 0 to Carry flag and bit 7.
+// Flags: Z=0, N=0, H=0, C=bit0
+// ============================================================================
+
+test "RRCA instruction - basic rotation with bit0=0" {
+    var c = cpu.CPU{};
+    c.a = 0b10101010; // 0xAA
+    c.f = 0b11110000; // All flags set initially
+    c.memory[0] = 0x0F;
+
+    try c.step();
+
+    // A should be rotated right, bit 0 (0) moves to bit 7 and carry
+    try std.testing.expectEqual(@as(u8, 0b01010101), c.a); // 0x55
+    // Flags: Z=0, N=0, H=0, C=0 (old bit 0)
+    try std.testing.expectEqual(@as(u8, 0b00000000), c.f);
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
+}
+
+test "RRCA instruction - rotation with bit0=1" {
+    var c = cpu.CPU{};
+    c.a = 0b01001101; // 0x4D
+    c.f = 0b00000000; // All flags clear initially
+    c.memory[0] = 0x0F;
+
+    try c.step();
+
+    // A should be rotated right, bit 0 (1) moves to bit 7 and carry
+    try std.testing.expectEqual(@as(u8, 0b10100110), c.a); // 0xA6
+    // Flags: Z=0, N=0, H=0, C=1 (old bit 0 was 1)
+    try std.testing.expectEqual(@as(u8, 0b00010000), c.f);
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
+}
+
+test "RRCA instruction - edge case with 0x00" {
+    var c = cpu.CPU{};
+    c.a = 0x00;
+    c.f = 0b11110000; // All flags set
+    c.memory[0] = 0x0F;
+
+    try c.step();
+
+    try std.testing.expectEqual(@as(u8, 0x00), c.a);
+    // Flags: Z=0 (always 0 for RRCA), N=0, H=0, C=0
+    try std.testing.expectEqual(@as(u8, 0b00000000), c.f);
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
+}
+
+test "RRCA instruction - edge case with 0xFF" {
+    var c = cpu.CPU{};
+    c.a = 0xFF;
+    c.f = 0b00000000; // All flags clear
+    c.memory[0] = 0x0F;
+
+    try c.step();
+
+    try std.testing.expectEqual(@as(u8, 0xFF), c.a); // All bits rotate
+    // Flags: Z=0, N=0, H=0, C=1 (bit 0 was 1)
+    try std.testing.expectEqual(@as(u8, 0b00010000), c.f);
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
+}
+
+test "RRCA instruction - edge case with 0x01" {
+    var c = cpu.CPU{};
+    c.a = 0x01; // Only bit 0 set
+    c.f = 0b00000000;
+    c.memory[0] = 0x0F;
+
+    try c.step();
+
+    // Bit 0 moves to bit 7
+    try std.testing.expectEqual(@as(u8, 0x80), c.a);
+    // Flags: Z=0, N=0, H=0, C=1
+    try std.testing.expectEqual(@as(u8, 0b00010000), c.f);
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
+}
+
+test "RRCA instruction - edge case with 0x80" {
+    var c = cpu.CPU{};
+    c.a = 0x80; // Only bit 7 set
+    c.f = 0b00010000; // Carry set (should be ignored)
+    c.memory[0] = 0x0F;
+
+    try c.step();
+
+    // Bit 0 is 0, so it moves to bit 7 (result is 0x40)
+    try std.testing.expectEqual(@as(u8, 0x40), c.a);
+    // Flags: Z=0, N=0, H=0, C=0 (bit 0 was 0)
+    try std.testing.expectEqual(@as(u8, 0b00000000), c.f);
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
+}
+
+test "RRCA instruction - multiple rotations bring back original" {
+    var c = cpu.CPU{};
+    c.a = 0b10110010; // 0xB2
+    c.f = 0b00000000;
+    c.memory[0] = 0x0F;
+    c.memory[1] = 0x0F;
+    c.memory[2] = 0x0F;
+    c.memory[3] = 0x0F;
+    c.memory[4] = 0x0F;
+    c.memory[5] = 0x0F;
+    c.memory[6] = 0x0F;
+    c.memory[7] = 0x0F;
+
+    // After 8 rotations, should return to original value
+    for (0..8) |_| {
+        try c.step();
+    }
+
+    try std.testing.expectEqual(@as(u8, 0b10110010), c.a); // Back to 0xB2
+    try std.testing.expectEqual(@as(u16, 8), c.pc);
+}
+
+test "RRCA instruction - complementary to RLCA" {
+    var c = cpu.CPU{};
+    c.a = 0b10110010; // 0xB2
+    c.f = 0b00000000;
+    c.memory[0] = 0x07; // RLCA
+    c.memory[1] = 0x0F; // RRCA
+
+    try c.step(); // RLCA
+    const after_rlca = c.a;
+    try c.step(); // RRCA
+
+    // Should get back original value
+    try std.testing.expectEqual(@as(u8, 0b10110010), c.a);
+    try std.testing.expectEqual(@as(u8, 0b01100101), after_rlca); // Verify it changed during RLCA
+    try std.testing.expectEqual(@as(u16, 2), c.pc);
+}
+
+// ============================================================================
+// RRA (0x1F) - Rotate Right Accumulator Tests
+// Specification: Rotate A right through Carry flag.
+// Old Carry to bit 7, old bit 0 to Carry.
+// Flags: Z=0, N=0, H=0, C=bit0
+// ============================================================================
+
+test "RRA instruction - basic rotation with carry=0, bit0=0" {
+    var c = cpu.CPU{};
+    c.a = 0b10101010; // 0xAA
+    c.f = 0b00000000; // Carry = 0
+    c.memory[0] = 0x1F;
+
+    try c.step();
+
+    // A should be rotated right with carry (0) inserted at bit 7
+    try std.testing.expectEqual(@as(u8, 0b01010101), c.a); // 0x55
+    // Flags: Z=0, N=0, H=0, C=0 (old bit 0 was 0)
+    try std.testing.expectEqual(@as(u8, 0b00000000), c.f);
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
+}
+
+test "RRA instruction - rotation with carry=1, bit0=0" {
+    var c = cpu.CPU{};
+    c.a = 0b10101010; // 0xAA
+    c.f = 0b00010000; // Carry = 1
+    c.memory[0] = 0x1F;
+
+    try c.step();
+
+    // A should be rotated right with old carry (1) inserted at bit 7
+    try std.testing.expectEqual(@as(u8, 0b11010101), c.a); // 0xD5
+    // Flags: Z=0, N=0, H=0, C=0 (old bit 0 was 0)
+    try std.testing.expectEqual(@as(u8, 0b00000000), c.f);
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
+}
+
+test "RRA instruction - rotation with carry=0, bit0=1" {
+    var c = cpu.CPU{};
+    c.a = 0b01001101; // 0x4D
+    c.f = 0b00000000; // Carry = 0
+    c.memory[0] = 0x1F;
+
+    try c.step();
+
+    // A should be rotated right with carry (0) inserted at bit 7
+    try std.testing.expectEqual(@as(u8, 0b00100110), c.a); // 0x26
+    // Flags: Z=0, N=0, H=0, C=1 (old bit 0 was 1)
+    try std.testing.expectEqual(@as(u8, 0b00010000), c.f);
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
+}
+
+test "RRA instruction - rotation with carry=1, bit0=1" {
+    var c = cpu.CPU{};
+    c.a = 0b01001101; // 0x4D
+    c.f = 0b00010000; // Carry = 1
+    c.memory[0] = 0x1F;
+
+    try c.step();
+
+    // A should be rotated right with old carry (1) inserted at bit 7
+    try std.testing.expectEqual(@as(u8, 0b10100110), c.a); // 0xA6
+    // Flags: Z=0, N=0, H=0, C=1 (old bit 0 was 1)
+    try std.testing.expectEqual(@as(u8, 0b00010000), c.f);
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
+}
+
+test "RRA instruction - all flags cleared except carry" {
+    var c = cpu.CPU{};
+    c.a = 0b00000001; // 0x01
+    c.f = 0b11110000; // All flags set (Z=1, N=1, H=1, C=1)
+    c.memory[0] = 0x1F;
+
+    try c.step();
+
+    // A should be rotated right with old carry (1) inserted at bit 7
+    try std.testing.expectEqual(@as(u8, 0b10000000), c.a); // 0x80
+    // Flags: Z=0, N=0, H=0, C=1 (old bit 0 was 1) - Z, N, H must be cleared!
+    try std.testing.expectEqual(@as(u8, 0b00010000), c.f);
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
+}
+
+test "RRA instruction - edge case with 0x00 and carry=0" {
+    var c = cpu.CPU{};
+    c.a = 0x00;
+    c.f = 0b00000000; // Carry = 0
+    c.memory[0] = 0x1F;
+
+    try c.step();
+
+    try std.testing.expectEqual(@as(u8, 0x00), c.a);
+    // Flags: Z=0 (always), N=0, H=0, C=0
+    try std.testing.expectEqual(@as(u8, 0b00000000), c.f);
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
+}
+
+test "RRA instruction - edge case with 0x00 and carry=1" {
+    var c = cpu.CPU{};
+    c.a = 0x00;
+    c.f = 0b00010000; // Carry = 1
+    c.memory[0] = 0x1F;
+
+    try c.step();
+
+    // Carry bit moves to bit 7
+    try std.testing.expectEqual(@as(u8, 0x80), c.a);
+    // Flags: Z=0, N=0, H=0, C=0 (old bit 0 was 0)
+    try std.testing.expectEqual(@as(u8, 0b00000000), c.f);
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
+}
+
+test "RRA instruction - edge case with 0xFF" {
+    var c = cpu.CPU{};
+    c.a = 0xFF;
+    c.f = 0b00010000; // Carry = 1
+    c.memory[0] = 0x1F;
+
+    try c.step();
+
+    try std.testing.expectEqual(@as(u8, 0xFF), c.a); // Rotates to 0xFF again with carry=1
+    // Flags: Z=0, N=0, H=0, C=1 (old bit 0 was 1)
+    try std.testing.expectEqual(@as(u8, 0b00010000), c.f);
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
+}
+
+test "RRA instruction - multiple rotations in sequence" {
+    var c = cpu.CPU{};
+    c.a = 0b00000001; // 0x01
+    c.f = 0b00000000; // Carry = 0
+    c.memory[0] = 0x1F;
+    c.memory[1] = 0x1F;
+
+    // First rotation
+    try c.step();
+    try std.testing.expectEqual(@as(u8, 0b00000000), c.a); // 0x00
+    try std.testing.expectEqual(@as(u8, 0b00010000), c.f); // C=1
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
+
+    // Second rotation
+    try c.step();
+    try std.testing.expectEqual(@as(u8, 0b10000000), c.a); // 0x80
+    try std.testing.expectEqual(@as(u8, 0b00000000), c.f); // C=0
+    try std.testing.expectEqual(@as(u16, 2), c.pc);
+}
+
+test "RRA instruction - complementary to RLA" {
+    var c = cpu.CPU{};
+    c.a = 0b10110010; // 0xB2
+    c.f = 0b00000000; // Carry = 0
+    c.memory[0] = 0x17; // RLA
+    c.memory[1] = 0x1F; // RRA
+
+    try c.step(); // RLA
+    const after_rla = c.a;
+    const carry_after_rla = c.f;
+    try c.step(); // RRA
+
+    // Should get back original value
+    try std.testing.expectEqual(@as(u8, 0b10110010), c.a);
+    try std.testing.expectEqual(@as(u8, 0b01100100), after_rla); // Verify it changed during RLA
+    try std.testing.expectEqual(@as(u16, 2), c.pc);
+    // Carry should also be back to 0
+    try std.testing.expectEqual(@as(u8, 0b00000000), c.f);
+    try std.testing.expectEqual(@as(u8, 0b00010000), carry_after_rla);
+}
+
+test "RRA instruction - 9-bit rotation behavior" {
+    var c = cpu.CPU{};
+    c.a = 0b10000000; // 0x80
+    c.f = 0b00010000; // Carry = 1
+    c.memory[0] = 0x1F;
+    c.memory[1] = 0x1F;
+    c.memory[2] = 0x1F;
+    c.memory[3] = 0x1F;
+    c.memory[4] = 0x1F;
+    c.memory[5] = 0x1F;
+    c.memory[6] = 0x1F;
+    c.memory[7] = 0x1F;
+    c.memory[8] = 0x1F;
+
+    // RRA performs a 9-bit rotation (8 bits + carry)
+    // After 9 rotations, should return to original value and carry
+    for (0..9) |_| {
+        try c.step();
+    }
+
+    try std.testing.expectEqual(@as(u8, 0b10000000), c.a); // Back to 0x80
+    try std.testing.expectEqual(@as(u8, 0b00010000), c.f); // Carry back to 1
+    try std.testing.expectEqual(@as(u16, 9), c.pc);
+}
