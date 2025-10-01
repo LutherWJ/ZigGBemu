@@ -28,13 +28,6 @@ pub const CPU = struct {
         _ = self;
     }
 
-    fn ld_bc_d16(self: *CPU) void {
-        self.c = self.memory[self.pc];
-        self.pc += 1;
-        self.b = self.memory[self.pc];
-        self.pc += 1;
-    }
-
     fn ld_bc_a(self: *CPU) void {
         const address = self.getBC();
         self.memory[address] = self.a;
@@ -116,20 +109,20 @@ pub const CPU = struct {
     fn inc_b(self: *CPU) void {
         const old = self.b;
         self.b +%= 1;
-        self.setIncFlags8(old, self.b);
+        self.updateFlags(u8, old, 1, self.b, false);
     }
 
     fn dec_b(self: *CPU) void {
         const old = self.b;
         self.b -%= 1;
-        self.setDecFlags8(old, self.b);
+        self.updateFlags(u8, old, self.b, 1, true);
     }
 
     fn add_hl_bc(self: *CPU) void {
         const hl = self.getHL();
         const bc = self.getBC();
         const result = hl +% bc;
-        self.setAddFlags16(hl, bc, result);
+        self.updateFlags(u16, hl, bc, result, false);
         self.setHL(result);
     }
 
@@ -140,57 +133,52 @@ pub const CPU = struct {
     fn inc_c(self: *CPU) void {
         const old = self.c;
         self.c +%= 1;
-        self.setIncFlags8(old, self.c);
+        self.updateFlags(u8, old, 1, self.c, false);
     }
 
     fn dec_c(self: *CPU) void {
         const old = self.c;
         self.c -%= 1;
-        self.setDecFlags8(old, self.c);
-    }
-
-    fn ld_de_d16(self: *CPU) void {
-        self.d = self.memory[self.pc];
-        self.pc += 1;
-        self.e = self.memory[self.pc];
-        self.pc += 1;
+        self.updateFlags(u8, old, 1, self.c, true);
     }
 
     fn inc_d(self: *CPU) void {
         const old = self.d;
         self.d +%= 1;
-        self.setIncFlags8(old, self.d);
+        self.updateFlags(u8, old, 1, self.d, false);
     }
 
     fn dec_d(self: *CPU) void {
         const old = self.d;
         self.d -%= 1;
-        self.setDecFlags8(old, self.d);
+        self.updateFlags(u8, old, 1, self.d, true);
     }
 
     fn add_hl_de(self: *CPU) void {
         const hl = self.getHL();
         const de = self.getDE();
         const result = hl +% de;
-        self.setAddFlags16(hl, de, result);
+        self.updateFlags(u16, hl, de, result, false);
         self.setHL(result);
     }
 
     fn dec_de(self: *CPU) void {
-        self.setDE(self.getDE() - 1);
+        const de = self.getDE();
+        self.setDE(de -% 1);
+        self.updateFlags(u16, de, 1, self.getDE(), true);
     }
 
     fn rlca(self: *CPU) void {
         const bit7 = (self.a >> 7) & 1;
         self.a = (self.a << 1) | bit7;
 
-        self.unsetZFlag();
-        self.unsetNFlag();
-        self.unsetHFlag();
+        self.unsetFlag(.z);
+        self.unsetFlag(.n);
+        self.unsetFlag(.h);
         if (bit7 != 0) {
-            self.setCFlag();
+            self.setFlag(.c);
         } else {
-            self.unsetCFlag();
+            self.unsetFlag(.c);
         }
     }
 
@@ -214,13 +202,13 @@ pub const CPU = struct {
         const bit0: u8 = self.a & 1;
         self.a = (self.a >> 1) | (bit0 << 7);
 
-        self.unsetZFlag();
-        self.unsetNFlag();
-        self.unsetHFlag();
+        self.unsetFlag(.z);
+        self.unsetFlag(.n);
+        self.unsetFlag(.h);
         if (bit0 != 0) {
-            self.setCFlag();
+            self.setFlag(.c);
         } else {
-            self.unsetCFlag();
+            self.unsetFlag(.c);
         }
     }
 
@@ -228,6 +216,134 @@ pub const CPU = struct {
         const address: u16 = std.mem.readInt(u16, self.memory[self.pc..][0..2], .little);
         self.pc += 2;
         std.mem.writeInt(u16, self.memory[address..][0..2], self.sp, .little);
+    }
+
+    fn jr_r8(self: *CPU) void {
+        const offset: i8 = @bitCast(self.memory[self.pc]);
+        self.pc += 1;
+        const offset_i16: i16 = offset;
+        const offset_u16: u16 = @bitCast(offset_i16);
+        self.pc +%= offset_u16;
+    }
+
+    fn jr_nz_r8(self: *CPU) void {
+        const offset: i8 = @bitCast(self.memory[self.pc]);
+        self.pc += 1;
+        if ((self.f & 0b10000000) != 0b10000000) {
+            const offset_i16: i16 = offset;
+            const offset_u16: u16 = @bitCast(offset_i16);
+            self.pc +%= offset_u16;
+        }
+    }
+
+    fn jr_z_r8(self: *CPU) void {
+        const offset: i8 = @bitCast(self.memory[self.pc]);
+        self.pc += 1;
+        if ((self.f & 0b10000000) == 0b10000000) {
+            const offset_i16: i16 = offset;
+            const offset_u16: u16 = @bitCast(offset_i16);
+            self.pc +%= offset_u16;
+        }
+    }
+
+    fn jr_nc_r8(self: *CPU) void {
+        const offset: i8 = @bitCast(self.memory[self.pc]);
+        self.pc += 1;
+        if ((self.f & 0b00010000) != 0b00010000) {
+            const offset_i16: i16 = offset;
+            const offset_u16: u16 = @bitCast(offset_i16);
+            self.pc +%= offset_u16;
+        }
+    }
+
+    fn jr_c_r8(self: *CPU) void {
+        const offset: i8 = @bitCast(self.memory[self.pc]);
+        self.pc += 1;
+        if ((self.f & 0b00010000) == 0b00010000) {
+            const offset_i16: i16 = offset;
+            const offset_u16: u16 = @bitCast(offset_i16);
+            self.pc +%= offset_u16;
+        }
+    }
+
+    fn ld_bc_d16(self: *CPU) void {
+        const d16 = std.mem.readInt(u16, self.memory[self.pc..][0..2], .little);
+        self.pc += 2;
+        self.setBC(d16);
+    }
+
+    fn ld_de_d16(self: *CPU) void {
+        const d16 = std.mem.readInt(u16, self.memory[self.pc..][0..2], .little);
+        self.pc += 2;
+        self.setDE(d16);
+    }
+
+    fn ld_hl_d16(self: *CPU) void {
+        const d16 = std.mem.readInt(u16, self.memory[self.pc..][0..2], .little);
+        self.pc += 2;
+        self.setHL(d16);
+    }
+
+    fn ld_sp_d16(self: *CPU) void {
+        const d16 = std.mem.readInt(u16, self.memory[self.pc..][0..2], .little);
+        self.pc += 2;
+        self.sp = d16;
+    }
+
+    fn add_hl_hl(self: *CPU) void {
+        const hl = self.getHL();
+        const result = hl +% hl;
+        self.setHL(result);
+        self.updateFlags(u16, hl, hl, result, false);
+    }
+
+    fn add_hl_sp(self: *CPU) void {
+        const hl = self.getHL();
+        const result = hl + self.sp;
+        self.setHL(result);
+        self.updateFlags(u16, hl, self.sp, result, false);
+    }
+
+    fn dec_HL(self: *CPU) void {
+        const old = self.getHL();
+        self.setHL(old -% 1);
+        self.updateFlags(u16, old, 1, true);
+    }
+
+    fn inc_e(self: *CPU) void {
+        const old = self.e;
+        self.e +%= 1;
+        self.updateFlags(u8, old, 1, self.e, false);
+    }
+
+    fn inc_l(self: *CPU) void {
+        const old = self.l;
+        self.l +%= 1;
+        self.updateFlags(u8, old, 1, self.l, false);
+    }
+
+    fn inc_a(self: *CPU) void {
+        const old = self.a;
+        self.a +%= 1;
+        self.updateFlags(u8, old, 1, self.a, false);
+    }
+
+    fn dec_e(self: *CPU) void {
+        const old = self.e;
+        self.e -%= 1;
+        self.updateFlags(u8, old, 1, self.e, true);
+    }
+
+    fn dec_l(self: *CPU) void {
+        const old = self.l;
+        self.l -%= 1;
+        self.updateFlags(u8, old, 1, self.l, true);
+    }
+
+    fn dec_a(self: *CPU) void {
+        const old = self.a;
+        self.a -%= 1;
+        self.updateFlags(u8, old, 1, self.a, true);
     }
 
     fn unknown_opcode(self: *CPU) void {
@@ -263,126 +379,49 @@ pub const CPU = struct {
         self.l = @truncate(val);
     }
 
-    fn setZFlag(self: *CPU) void {
-        self.f |= (1 << 7);
+    fn setFlag(self: *CPU, comptime flag: Flag) void {
+        self.f |= (@as(u8, 1) << @intFromEnum(flag));
     }
 
-    fn setNFlag(self: *CPU) void {
-        self.f |= (1 << 6);
+    fn unsetFlag(self: *CPU, comptime flag: Flag) void {
+        self.f &= ~(@as(u8, 1) << @intFromEnum(flag));
     }
 
-    fn setHFlag(self: *CPU) void {
-        self.f |= (1 << 5);
-    }
-
-    fn setCFlag(self: *CPU) void {
-        self.f |= (1 << 4);
-    }
-
-    fn unsetZFlag(self: *CPU) void {
-        self.f &= ~(@as(u8, 1) << 7);
-    }
-
-    fn unsetNFlag(self: *CPU) void {
-        self.f &= ~(@as(u8, 1) << 6);
-    }
-
-    fn unsetHFlag(self: *CPU) void {
-        self.f &= ~(@as(u8, 1) << 5);
-    }
-
-    fn unsetCFlag(self: *CPU) void {
-        self.f &= ~(@as(u8, 1) << 4);
-    }
-
-    fn checkZFlag(self: *CPU, value: u8) void {
-        if (value == 0) {
-            self.setZFlag();
+    fn checkFlag(self: *CPU, comptime flag: Flag, condition: bool) void {
+        if (condition) {
+            self.setFlag(flag);
         } else {
-            self.unsetZFlag();
+            self.unsetFlag(flag);
         }
     }
 
-    fn setAddFlags8(self: *CPU, a: u8, b: u8, result: u8) void {
-        if (result == 0) {
-            self.setZFlag();
-        } else {
-            self.unsetZFlag();
-        }
-        self.unsetNFlag();
-        if ((a & 0x0F) + (b & 0x0F) > 0x0F) {
-            self.setHFlag();
-        } else {
-            self.unsetHFlag();
-        }
-        if (result < a) {
-            self.setCFlag();
-        } else {
-            self.unsetCFlag();
-        }
-    }
+    fn updateFlags(self: *CPU, comptime T: type, a: T, b: T, result: T, comptime is_subtract: bool) void {
+        self.checkFlag(.z, result == 0);
+        self.checkFlag(.n, is_subtract);
 
-    fn setSubFlags8(self: *CPU, a: u8, b: u8, result: u8) void {
-        if (result == 0) {
-            self.setZFlag();
+        if (T == u8) {
+            if (is_subtract) {
+                self.checkFlag(.h, (a & 0x0F) < (b & 0x0F));
+                self.checkFlag(.c, a < b);
+            } else {
+                self.checkFlag(.h, (a & 0x0F) + (b & 0x0F) > 0x0F);
+                self.checkFlag(.c, result < a);
+            }
+        } else if (T == u16) {
+            if (is_subtract) {
+                self.checkFlag(.h, (a & 0x0FFF) < (b & 0x0FFF));
+                self.checkFlag(.c, a < b);
+            } else {
+                self.checkFlag(.h, (a & 0x0FFF) + (b & 0x0FFF) > 0x0FFF);
+                self.checkFlag(.c, result < a);
+            }
         } else {
-            self.unsetZFlag();
-        }
-        self.setNFlag();
-        if ((a & 0x0F) < (b & 0x0F)) {
-            self.setHFlag();
-        } else {
-            self.unsetHFlag();
-        }
-        if (a < b) {
-            self.setCFlag();
-        } else {
-            self.unsetCFlag();
-        }
-    }
-
-    fn setAddFlags16(self: *CPU, a: u16, b: u16, result: u16) void {
-        self.unsetNFlag();
-        if ((a & 0x0FFF) + (b & 0x0FFF) > 0x0FFF) {
-            self.setHFlag();
-        } else {
-            self.unsetHFlag();
-        }
-        if (result < a) {
-            self.setCFlag();
-        } else {
-            self.unsetCFlag();
-        }
-    }
-
-    fn setIncFlags8(self: *CPU, old_value: u8, new_value: u8) void {
-        if (new_value == 0) {
-            self.setZFlag();
-        } else {
-            self.unsetZFlag();
-        }
-        self.unsetNFlag();
-        if ((old_value & 0x0F) == 0x0F) {
-            self.setHFlag();
-        } else {
-            self.unsetHFlag();
-        }
-    }
-
-    fn setDecFlags8(self: *CPU, old_value: u8, new_value: u8) void {
-        if (new_value == 0) {
-            self.setZFlag();
-        } else {
-            self.unsetZFlag();
-        }
-        self.setNFlag();
-        if ((old_value & 0x0F) == 0x00) {
-            self.setHFlag();
-        } else {
-            self.unsetHFlag();
+            unreachable;
         }
     }
 };
+
+const Flag = enum(u3) { z = 7, n = 6, h = 5, c = 4 };
 
 // Instruction table matching opcodes to their corresponding functions
 const instruction_table = blk: {
@@ -412,13 +451,25 @@ const instruction_table = blk: {
     table[0x19] = CPU.add_hl_de;
     table[0x1A] = CPU.ld_a_de;
     table[0x1B] = CPU.dec_de;
+    table[0x1C] = CPU.inc_e;
+    table[0x1D] = CPU.dec_e;
     table[0x1E] = CPU.ld_e_d8;
     table[0x1F] = CPU.rra;
+    table[0x18] = CPU.jr_r8;
+    table[0x20] = CPU.jr_nz_r8;
+    table[0x21] = CPU.ld_hl_d16;
     table[0x22] = CPU.ld_hlplus_a;
     table[0x26] = CPU.ld_h_d8;
+    table[0x28] = CPU.jr_z_r8;
     table[0x2A] = CPU.ld_a_hlplus;
+    table[0x2C] = CPU.inc_l;
+    table[0x2D] = CPU.dec_l;
     table[0x2E] = CPU.ld_l_d8;
+    table[0x30] = CPU.jr_nc_r8;
     table[0x32] = CPU.ld_hlminus_a;
+    table[0x38] = CPU.jr_c_r8;
     table[0x3A] = CPU.ld_a_hlminus;
+    table[0x3C] = CPU.inc_a;
+    table[0x3D] = CPU.dec_a;
     break :blk table;
 };
