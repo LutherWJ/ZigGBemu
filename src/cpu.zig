@@ -8,6 +8,128 @@ const std = @import("std");
 
 const InstructionFn = *const fn (*CPU) void;
 const Flag = enum(u3) { z = 7, n = 6, h = 5, c = 4 };
+const Register = enum(u3) { a = 0, f = 1, b = 2, c = 3, d = 4, e = 5, h = 6, l = 7 };
+
+// Comptime function generators for reducing boilerplate
+fn makeLdRegReg(comptime dst: Register, comptime src: Register) InstructionFn {
+    return struct {
+        fn f(cpu: *CPU) void {
+            cpu.getRegister(dst).* = cpu.getRegister(src).*;
+        }
+    }.f;
+}
+
+fn makeLdRegHlPtr(comptime dst: Register) InstructionFn {
+    return struct {
+        fn f(cpu: *CPU) void {
+            cpu.getRegister(dst).* = cpu.memory[cpu.getHL()];
+        }
+    }.f;
+}
+
+fn makeLdHlPtrReg(comptime src: Register) InstructionFn {
+    return struct {
+        fn f(cpu: *CPU) void {
+            cpu.memory[cpu.getHL()] = cpu.getRegister(src).*;
+        }
+    }.f;
+}
+
+fn makeAddReg(comptime src: Register) InstructionFn {
+    return struct {
+        fn f(cpu: *CPU) void {
+            const old = cpu.a;
+            const value = cpu.getRegister(src).*;
+            cpu.a +%= value;
+            cpu.updateFlags(u8, old, value, cpu.a, false);
+        }
+    }.f;
+}
+
+fn makeSubReg(comptime src: Register) InstructionFn {
+    return struct {
+        fn f(cpu: *CPU) void {
+            const old = cpu.a;
+            const value = cpu.getRegister(src).*;
+            cpu.a -%= value;
+            cpu.updateFlags(u8, old, value, cpu.a, true);
+        }
+    }.f;
+}
+
+fn makeAndReg(comptime src: Register) InstructionFn {
+    return struct {
+        fn f(cpu: *CPU) void {
+            const value = cpu.getRegister(src).*;
+            cpu.a &= value;
+            cpu.checkFlag(.z, cpu.a == 0);
+            cpu.unsetFlag(.n);
+            cpu.setFlag(.h);
+            cpu.unsetFlag(.c);
+        }
+    }.f;
+}
+
+fn makeOrReg(comptime src: Register) InstructionFn {
+    return struct {
+        fn f(cpu: *CPU) void {
+            const value = cpu.getRegister(src).*;
+            cpu.a |= value;
+            cpu.checkFlag(.z, cpu.a == 0);
+            cpu.unsetFlag(.n);
+            cpu.unsetFlag(.h);
+            cpu.unsetFlag(.c);
+        }
+    }.f;
+}
+
+fn makeXorReg(comptime src: Register) InstructionFn {
+    return struct {
+        fn f(cpu: *CPU) void {
+            const value = cpu.getRegister(src).*;
+            cpu.a ^= value;
+            cpu.checkFlag(.z, cpu.a == 0);
+            cpu.unsetFlag(.n);
+            cpu.unsetFlag(.h);
+            cpu.unsetFlag(.c);
+        }
+    }.f;
+}
+
+fn makeCpReg(comptime src: Register) InstructionFn {
+    return struct {
+        fn f(cpu: *CPU) void {
+            const value = cpu.getRegister(src).*;
+            const result = cpu.a -% value;
+            cpu.checkFlag(.z, result == 0);
+            cpu.setFlag(.n);
+            cpu.checkFlag(.h, (cpu.a & 0x0F) < (value & 0x0F));
+            cpu.checkFlag(.c, cpu.a < value);
+        }
+    }.f;
+}
+
+fn makeIncReg(comptime dst: Register) InstructionFn {
+    return struct {
+        fn f(cpu: *CPU) void {
+            const reg = cpu.getRegister(dst);
+            const old = reg.*;
+            reg.* +%= 1;
+            cpu.updateFlags(u8, old, 1, reg.*, false);
+        }
+    }.f;
+}
+
+fn makeDecReg(comptime dst: Register) InstructionFn {
+    return struct {
+        fn f(cpu: *CPU) void {
+            const reg = cpu.getRegister(dst);
+            const old = reg.*;
+            reg.* -%= 1;
+            cpu.updateFlags(u8, old, 1, reg.*, true);
+        }
+    }.f;
+}
 
 // Instruction table matching opcodes to their corresponding functions
 const instruction_table = blk: {
@@ -16,30 +138,30 @@ const instruction_table = blk: {
     table[0x01] = CPU.ld_bc_d16;
     table[0x02] = CPU.ld_bc_ptr_a;
     table[0x03] = CPU.inc_bc;
-    table[0x04] = CPU.inc_b;
-    table[0x05] = CPU.dec_b;
+    table[0x04] = makeIncReg(.b);
+    table[0x05] = makeDecReg(.b);
     table[0x06] = CPU.ld_b_d8;
     table[0x07] = CPU.rlca;
     table[0x08] = CPU.ld_a16_ptr_sp;
     table[0x09] = CPU.add_hl_bc;
     table[0x0A] = CPU.ld_a_bc_ptr;
     table[0x0B] = CPU.dec_bc;
-    table[0x0C] = CPU.inc_c;
-    table[0x0D] = CPU.dec_c;
+    table[0x0C] = makeIncReg(.c);
+    table[0x0D] = makeDecReg(.c);
     table[0x0E] = CPU.ld_c_d8;
     table[0x0F] = CPU.rrca;
     table[0x11] = CPU.ld_de_d16;
     table[0x12] = CPU.ld_de_ptr_a;
     table[0x13] = CPU.inc_de;
-    table[0x14] = CPU.inc_d;
-    table[0x15] = CPU.dec_d;
+    table[0x14] = makeIncReg(.d);
+    table[0x15] = makeDecReg(.d);
     table[0x16] = CPU.ld_d_d8;
     table[0x17] = CPU.rla;
     table[0x19] = CPU.add_hl_de;
     table[0x1A] = CPU.ld_a_de_ptr;
     table[0x1B] = CPU.dec_de;
-    table[0x1C] = CPU.inc_e;
-    table[0x1D] = CPU.dec_e;
+    table[0x1C] = makeIncReg(.e);
+    table[0x1D] = makeDecReg(.e);
     table[0x1E] = CPU.ld_e_d8;
     table[0x1F] = CPU.rra;
     table[0x18] = CPU.jr_r8;
@@ -47,15 +169,15 @@ const instruction_table = blk: {
     table[0x21] = CPU.ld_hl_d16;
     table[0x22] = CPU.ld_hl_ptr_plus_a;
     table[0x23] = CPU.inc_hl;
-    table[0x24] = CPU.inc_h;
-    table[0x25] = CPU.dec_h;
+    table[0x24] = makeIncReg(.h);
+    table[0x25] = makeDecReg(.h);
     table[0x26] = CPU.ld_h_d8;
     table[0x28] = CPU.jr_z_r8;
     table[0x29] = CPU.add_hl_hl;
     table[0x2A] = CPU.ld_a_hl_ptr_plus;
     table[0x2B] = CPU.dec_hl;
-    table[0x2C] = CPU.inc_l;
-    table[0x2D] = CPU.dec_l;
+    table[0x2C] = makeIncReg(.l);
+    table[0x2D] = makeDecReg(.l);
     table[0x2E] = CPU.ld_l_d8;
     table[0x30] = CPU.jr_nc_r8;
     table[0x32] = CPU.ld_hl_ptr_minus_a;
@@ -67,91 +189,100 @@ const instruction_table = blk: {
     table[0x39] = CPU.add_hl_sp;
     table[0x3A] = CPU.ld_a_hl_ptr_minus;
     table[0x3B] = CPU.dec_sp;
-    table[0x3C] = CPU.inc_a;
-    table[0x3D] = CPU.dec_a;
+    table[0x3C] = makeIncReg(.a);
+    table[0x3D] = makeDecReg(.a);
     table[0x3E] = CPU.ld_a_d8;
-    table[0x40] = CPU.ld_b_b;
-    table[0x41] = CPU.ld_b_c;
-    table[0x42] = CPU.ld_b_d;
-    table[0x43] = CPU.ld_b_e;
-    table[0x44] = CPU.ld_b_h;
-    table[0x45] = CPU.ld_b_l;
-    table[0x46] = CPU.ld_b_hl_ptr;
-    table[0x47] = CPU.ld_b_a;
-    table[0x48] = CPU.ld_c_b;
-    table[0x49] = CPU.ld_c_c;
-    table[0x4A] = CPU.ld_c_d;
-    table[0x4B] = CPU.ld_c_e;
-    table[0x4C] = CPU.ld_c_h;
-    table[0x4D] = CPU.ld_c_l;
-    table[0x4E] = CPU.ld_c_hl_ptr;
-    table[0x4F] = CPU.ld_c_a;
-    table[0x50] = CPU.ld_d_b;
-    table[0x51] = CPU.ld_d_c;
-    table[0x52] = CPU.ld_d_d;
-    table[0x53] = CPU.ld_d_e;
-    table[0x54] = CPU.ld_d_h;
-    table[0x55] = CPU.ld_d_l;
-    table[0x56] = CPU.ld_d_hl_ptr;
-    table[0x57] = CPU.ld_d_a;
-    table[0x58] = CPU.ld_e_b;
-    table[0x59] = CPU.ld_e_c;
-    table[0x5A] = CPU.ld_e_d;
-    table[0x5B] = CPU.ld_e_e;
-    table[0x5C] = CPU.ld_e_h;
-    table[0x5D] = CPU.ld_e_l;
-    table[0x5E] = CPU.ld_e_hl_ptr;
-    table[0x5F] = CPU.ld_e_a;
-    table[0x60] = CPU.ld_h_b;
-    table[0x61] = CPU.ld_h_c;
-    table[0x62] = CPU.ld_h_d;
-    table[0x63] = CPU.ld_h_e;
-    table[0x64] = CPU.ld_h_h;
-    table[0x65] = CPU.ld_h_l;
-    table[0x66] = CPU.ld_h_hl_ptr;
-    table[0x67] = CPU.ld_h_a;
-    table[0x68] = CPU.ld_l_b;
-    table[0x69] = CPU.ld_l_c;
-    table[0x6A] = CPU.ld_l_d;
-    table[0x6B] = CPU.ld_l_e;
-    table[0x6C] = CPU.ld_l_h;
-    table[0x6D] = CPU.ld_l_l;
-    table[0x6E] = CPU.ld_l_hl_ptr;
-    table[0x6F] = CPU.ld_l_a;
-    table[0x70] = CPU.ld_hl_ptr_b;
-    table[0x71] = CPU.ld_hl_ptr_c;
-    table[0x72] = CPU.ld_hl_ptr_d;
-    table[0x73] = CPU.ld_hl_ptr_e;
-    table[0x74] = CPU.ld_hl_ptr_h;
-    table[0x75] = CPU.ld_hl_ptr_l;
+    table[0x40] = CPU.nop; // LD B,B (NOP)
+    table[0x41] = makeLdRegReg(.b, .c);
+    table[0x42] = makeLdRegReg(.b, .d);
+    table[0x43] = makeLdRegReg(.b, .e);
+    table[0x44] = makeLdRegReg(.b, .h);
+    table[0x45] = makeLdRegReg(.b, .l);
+    table[0x46] = makeLdRegHlPtr(.b);
+    table[0x47] = makeLdRegReg(.b, .a);
+    table[0x48] = makeLdRegReg(.c, .b);
+    table[0x49] = CPU.nop; // LD C,C (NOP)
+    table[0x4A] = makeLdRegReg(.c, .d);
+    table[0x4B] = makeLdRegReg(.c, .e);
+    table[0x4C] = makeLdRegReg(.c, .h);
+    table[0x4D] = makeLdRegReg(.c, .l);
+    table[0x4E] = makeLdRegHlPtr(.c);
+    table[0x4F] = makeLdRegReg(.c, .a);
+    table[0x50] = makeLdRegReg(.d, .b);
+    table[0x51] = makeLdRegReg(.d, .c);
+    table[0x52] = CPU.nop; // LD D,D (NOP)
+    table[0x53] = makeLdRegReg(.d, .e);
+    table[0x54] = makeLdRegReg(.d, .h);
+    table[0x55] = makeLdRegReg(.d, .l);
+    table[0x56] = makeLdRegHlPtr(.d);
+    table[0x57] = makeLdRegReg(.d, .a);
+    table[0x58] = makeLdRegReg(.e, .b);
+    table[0x59] = makeLdRegReg(.e, .c);
+    table[0x5A] = makeLdRegReg(.e, .d);
+    table[0x5B] = CPU.nop; // LD E,E (NOP)
+    table[0x5C] = makeLdRegReg(.e, .h);
+    table[0x5D] = makeLdRegReg(.e, .l);
+    table[0x5E] = makeLdRegHlPtr(.e);
+    table[0x5F] = makeLdRegReg(.e, .a);
+    table[0x60] = makeLdRegReg(.h, .b);
+    table[0x61] = makeLdRegReg(.h, .c);
+    table[0x62] = makeLdRegReg(.h, .d);
+    table[0x63] = makeLdRegReg(.h, .e);
+    table[0x64] = CPU.nop; // LD H,H (NOP)
+    table[0x65] = makeLdRegReg(.h, .l);
+    table[0x66] = makeLdRegHlPtr(.h);
+    table[0x67] = makeLdRegReg(.h, .a);
+    table[0x68] = makeLdRegReg(.l, .b);
+    table[0x69] = makeLdRegReg(.l, .c);
+    table[0x6A] = makeLdRegReg(.l, .d);
+    table[0x6B] = makeLdRegReg(.l, .e);
+    table[0x6C] = makeLdRegReg(.l, .h);
+    table[0x6D] = CPU.nop; // LD L,L (NOP)
+    table[0x6E] = makeLdRegHlPtr(.l);
+    table[0x6F] = makeLdRegReg(.l, .a);
+    table[0x70] = makeLdHlPtrReg(.b);
+    table[0x71] = makeLdHlPtrReg(.c);
+    table[0x72] = makeLdHlPtrReg(.d);
+    table[0x73] = makeLdHlPtrReg(.e);
+    table[0x74] = makeLdHlPtrReg(.h);
+    table[0x75] = makeLdHlPtrReg(.l);
     table[0x76] = CPU.halt;
-    table[0x77] = CPU.ld_hl_ptr_a;
-    table[0x78] = CPU.ld_a_b;
-    table[0x79] = CPU.ld_a_c;
-    table[0x7A] = CPU.ld_a_d;
-    table[0x7B] = CPU.ld_a_e;
-    table[0x7C] = CPU.ld_a_h;
-    table[0x7D] = CPU.ld_a_l;
-    table[0x7E] = CPU.ld_a_hl_ptr;
-    table[0x7F] = CPU.ld_a_a;
-    table[0x80] = CPU.add_a_b;
-    table[0x81] = CPU.add_a_c;
-    table[0x82] = CPU.add_a_d;
-    table[0x83] = CPU.add_a_e;
-    table[0x84] = CPU.add_a_h;
-    table[0x85] = CPU.add_a_l;
+    table[0x77] = makeLdHlPtrReg(.a);
+    table[0x78] = makeLdRegReg(.a, .b);
+    table[0x79] = makeLdRegReg(.a, .c);
+    table[0x7A] = makeLdRegReg(.a, .d);
+    table[0x7B] = makeLdRegReg(.a, .e);
+    table[0x7C] = makeLdRegReg(.a, .h);
+    table[0x7D] = makeLdRegReg(.a, .l);
+    table[0x7E] = makeLdRegHlPtr(.a);
+    table[0x7F] = CPU.nop; // LD A,A (NOP)
+    table[0x80] = makeAddReg(.b);
+    table[0x81] = makeAddReg(.c);
+    table[0x82] = makeAddReg(.d);
+    table[0x83] = makeAddReg(.e);
+    table[0x84] = makeAddReg(.h);
+    table[0x85] = makeAddReg(.l);
     table[0x86] = CPU.add_a_hl_ptr;
-    table[0x87] = CPU.add_a_a;
-    table[0x90] = CPU.sub_a_b;
-    table[0x91] = CPU.sub_a_c;
-    table[0x92] = CPU.sub_a_d;
-    table[0x93] = CPU.sub_a_e;
-    table[0x94] = CPU.sub_a_h;
-    table[0x95] = CPU.sub_a_l;
+    table[0x87] = makeAddReg(.a);
+    table[0x90] = makeSubReg(.b);
+    table[0x91] = makeSubReg(.c);
+    table[0x92] = makeSubReg(.d);
+    table[0x93] = makeSubReg(.e);
+    table[0x94] = makeSubReg(.h);
+    table[0x95] = makeSubReg(.l);
     table[0x96] = CPU.sub_a_hl_ptr;
-    table[0x97] = CPU.sub_a_a;
+    table[0x97] = makeSubReg(.a);
+    table[0xB8] = makeCpReg(.b);
+    table[0xB9] = makeCpReg(.c);
+    table[0xBA] = makeCpReg(.d);
+    table[0xBB] = makeCpReg(.e);
+    table[0xBC] = makeCpReg(.h);
+    table[0xBD] = makeCpReg(.l);
+    table[0xBE] = CPU.cp_hl_ptr;
+    table[0xBF] = makeCpReg(.a);
     table[0xC6] = CPU.add_a_d8;
     table[0xD6] = CPU.sub_a_d8;
+    table[0xFE] = CPU.cp_d8;
     break :blk table;
 };
 
@@ -260,17 +391,6 @@ pub const CPU = struct {
         self.setBC(self.getBC() + 1);
     }
 
-    fn inc_b(self: *CPU) void {
-        const old = self.b;
-        self.b +%= 1;
-        self.updateFlags(u8, old, 1, self.b, false);
-    }
-
-    fn dec_b(self: *CPU) void {
-        const old = self.b;
-        self.b -%= 1;
-        self.updateFlags(u8, old, self.b, 1, true);
-    }
 
     fn add_hl_bc(self: *CPU) void {
         const hl = self.getHL();
@@ -284,29 +404,6 @@ pub const CPU = struct {
         self.setBC(self.getBC() -% 1);
     }
 
-    fn inc_c(self: *CPU) void {
-        const old = self.c;
-        self.c +%= 1;
-        self.updateFlags(u8, old, 1, self.c, false);
-    }
-
-    fn dec_c(self: *CPU) void {
-        const old = self.c;
-        self.c -%= 1;
-        self.updateFlags(u8, old, 1, self.c, true);
-    }
-
-    fn inc_d(self: *CPU) void {
-        const old = self.d;
-        self.d +%= 1;
-        self.updateFlags(u8, old, 1, self.d, false);
-    }
-
-    fn dec_d(self: *CPU) void {
-        const old = self.d;
-        self.d -%= 1;
-        self.updateFlags(u8, old, 1, self.d, true);
-    }
 
     fn add_hl_de(self: *CPU) void {
         const hl = self.getHL();
@@ -464,51 +561,9 @@ pub const CPU = struct {
         self.updateFlags(u16, old, 1, true);
     }
 
-    fn inc_e(self: *CPU) void {
-        const old = self.e;
-        self.e +%= 1;
-        self.updateFlags(u8, old, 1, self.e, false);
-    }
-
-    fn inc_l(self: *CPU) void {
-        const old = self.l;
-        self.l +%= 1;
-        self.updateFlags(u8, old, 1, self.l, false);
-    }
-
-    fn inc_a(self: *CPU) void {
-        const old = self.a;
-        self.a +%= 1;
-        self.updateFlags(u8, old, 1, self.a, false);
-    }
-
-    fn dec_e(self: *CPU) void {
-        const old = self.e;
-        self.e -%= 1;
-        self.updateFlags(u8, old, 1, self.e, true);
-    }
-
-    fn dec_l(self: *CPU) void {
-        const old = self.l;
-        self.l -%= 1;
-        self.updateFlags(u8, old, 1, self.l, true);
-    }
-
-    fn dec_a(self: *CPU) void {
-        const old = self.a;
-        self.a -%= 1;
-        self.updateFlags(u8, old, 1, self.a, true);
-    }
-
     // TODO: Need interrupts and halt states to implement
     fn stop(self: *CPU) void {
         self.stopped = true;
-    }
-
-    fn inc_h(self: *CPU) void {
-        const old = self.h;
-        self.h +%= 1;
-        self.updateFlags(u8, old, 1, self.h, false);
     }
 
     fn inc_hl(self: *CPU) void {
@@ -531,12 +586,6 @@ pub const CPU = struct {
         self.sp +%= 1;
     }
 
-    fn dec_h(self: *CPU) void {
-        const old = self.h;
-        self.h -%= 1;
-        self.updateFlags(u8, old, 1, self.h, true);
-    }
-
     fn dec_hl(self: *CPU) void {
         self.setHL(self.getHL() -% 1);
     }
@@ -552,54 +601,12 @@ pub const CPU = struct {
         self.sp -%= 1;
     }
 
-    fn add_a_b(self: *CPU) void {
-        const old = self.a;
-        self.a +%= self.b;
-        self.updateFlags(u8, old, self.b, self.a, false);
-    }
-
-    fn add_a_c(self: *CPU) void {
-        const old = self.a;
-        self.a +%= self.c;
-        self.updateFlags(u8, old, self.c, self.a, false);
-    }
-
-    fn add_a_d(self: *CPU) void {
-        const old = self.a;
-        self.a +%= self.d;
-        self.updateFlags(u8, old, self.d, self.a, false);
-    }
-
-    fn add_a_e(self: *CPU) void {
-        const old = self.a;
-        self.a +%= self.e;
-        self.updateFlags(u8, old, self.e, self.a, false);
-    }
-
-    fn add_a_h(self: *CPU) void {
-        const old = self.a;
-        self.a +%= self.h;
-        self.updateFlags(u8, old, self.h, self.a, false);
-    }
-
-    fn add_a_l(self: *CPU) void {
-        const old = self.a;
-        self.a +%= self.l;
-        self.updateFlags(u8, old, self.l, self.a, false);
-    }
-
     fn add_a_hl_ptr(self: *CPU) void {
         const address = self.getHL();
         const old = self.a;
         const value = self.memory[address];
         self.a +%= value;
         self.updateFlags(u8, old, value, self.a, false);
-    }
-
-    fn add_a_a(self: *CPU) void {
-        const old = self.a;
-        self.a +%= self.a;
-        self.updateFlags(u8, old, old, self.a, false);
     }
 
     fn add_a_d8(self: *CPU) void {
@@ -610,42 +617,6 @@ pub const CPU = struct {
         self.updateFlags(u8, old, value, self.a, false);
     }
 
-    fn sub_a_b(self: *CPU) void {
-        const old = self.a;
-        self.a -%= self.b;
-        self.updateFlags(u8, old, self.b, self.a, true);
-    }
-
-    fn sub_a_c(self: *CPU) void {
-        const old = self.a;
-        self.a -%= self.c;
-        self.updateFlags(u8, old, self.c, self.a, true);
-    }
-
-    fn sub_a_d(self: *CPU) void {
-        const old = self.a;
-        self.a -%= self.d;
-        self.updateFlags(u8, old, self.d, self.a, true);
-    }
-
-    fn sub_a_e(self: *CPU) void {
-        const old = self.a;
-        self.a -%= self.e;
-        self.updateFlags(u8, old, self.e, self.a, true);
-    }
-
-    fn sub_a_h(self: *CPU) void {
-        const old = self.a;
-        self.a -%= self.h;
-        self.updateFlags(u8, old, self.h, self.a, true);
-    }
-
-    fn sub_a_l(self: *CPU) void {
-        const old = self.a;
-        self.a -%= self.l;
-        self.updateFlags(u8, old, self.l, self.a, true);
-    }
-
     fn sub_a_hl_ptr(self: *CPU) void {
         const address = self.getHL();
         const old = self.a;
@@ -654,216 +625,12 @@ pub const CPU = struct {
         self.updateFlags(u8, old, value, self.a, true);
     }
 
-    fn sub_a_a(self: *CPU) void {
-        const old = self.a;
-        self.a -%= self.a;
-        self.updateFlags(u8, old, old, self.a, true);
-    }
-
     fn sub_a_d8(self: *CPU) void {
         const old = self.a;
         const value = self.memory[self.pc];
         self.pc += 1;
         self.a -%= value;
         self.updateFlags(u8, old, value, self.a, true);
-    }
-
-    // LD r,r instructions
-    fn ld_b_b(self: *CPU) void {
-        _ = self;
-    }
-    fn ld_b_c(self: *CPU) void {
-        self.b = self.c;
-    }
-    fn ld_b_d(self: *CPU) void {
-        self.b = self.d;
-    }
-    fn ld_b_e(self: *CPU) void {
-        self.b = self.e;
-    }
-    fn ld_b_h(self: *CPU) void {
-        self.b = self.h;
-    }
-    fn ld_b_l(self: *CPU) void {
-        self.b = self.l;
-    }
-    fn ld_b_hl_ptr(self: *CPU) void {
-        self.b = self.memory[self.getHL()];
-    }
-    fn ld_b_a(self: *CPU) void {
-        self.b = self.a;
-    }
-
-    fn ld_c_b(self: *CPU) void {
-        self.c = self.b;
-    }
-    fn ld_c_c(self: *CPU) void {
-        _ = self;
-    }
-    fn ld_c_d(self: *CPU) void {
-        self.c = self.d;
-    }
-    fn ld_c_e(self: *CPU) void {
-        self.c = self.e;
-    }
-    fn ld_c_h(self: *CPU) void {
-        self.c = self.h;
-    }
-    fn ld_c_l(self: *CPU) void {
-        self.c = self.l;
-    }
-    fn ld_c_hl_ptr(self: *CPU) void {
-        self.c = self.memory[self.getHL()];
-    }
-    fn ld_c_a(self: *CPU) void {
-        self.c = self.a;
-    }
-
-    fn ld_d_b(self: *CPU) void {
-        self.d = self.b;
-    }
-    fn ld_d_c(self: *CPU) void {
-        self.d = self.c;
-    }
-    fn ld_d_d(self: *CPU) void {
-        _ = self;
-    }
-    fn ld_d_e(self: *CPU) void {
-        self.d = self.e;
-    }
-    fn ld_d_h(self: *CPU) void {
-        self.d = self.h;
-    }
-    fn ld_d_l(self: *CPU) void {
-        self.d = self.l;
-    }
-    fn ld_d_hl_ptr(self: *CPU) void {
-        self.d = self.memory[self.getHL()];
-    }
-    fn ld_d_a(self: *CPU) void {
-        self.d = self.a;
-    }
-
-    fn ld_e_b(self: *CPU) void {
-        self.e = self.b;
-    }
-    fn ld_e_c(self: *CPU) void {
-        self.e = self.c;
-    }
-    fn ld_e_d(self: *CPU) void {
-        self.e = self.d;
-    }
-    fn ld_e_e(self: *CPU) void {
-        _ = self;
-    }
-    fn ld_e_h(self: *CPU) void {
-        self.e = self.h;
-    }
-    fn ld_e_l(self: *CPU) void {
-        self.e = self.l;
-    }
-    fn ld_e_hl_ptr(self: *CPU) void {
-        self.e = self.memory[self.getHL()];
-    }
-    fn ld_e_a(self: *CPU) void {
-        self.e = self.a;
-    }
-
-    fn ld_h_b(self: *CPU) void {
-        self.h = self.b;
-    }
-    fn ld_h_c(self: *CPU) void {
-        self.h = self.c;
-    }
-    fn ld_h_d(self: *CPU) void {
-        self.h = self.d;
-    }
-    fn ld_h_e(self: *CPU) void {
-        self.h = self.e;
-    }
-    fn ld_h_h(self: *CPU) void {
-        _ = self;
-    }
-    fn ld_h_l(self: *CPU) void {
-        self.h = self.l;
-    }
-    fn ld_h_hl_ptr(self: *CPU) void {
-        self.h = self.memory[self.getHL()];
-    }
-    fn ld_h_a(self: *CPU) void {
-        self.h = self.a;
-    }
-
-    fn ld_l_b(self: *CPU) void {
-        self.l = self.b;
-    }
-    fn ld_l_c(self: *CPU) void {
-        self.l = self.c;
-    }
-    fn ld_l_d(self: *CPU) void {
-        self.l = self.d;
-    }
-    fn ld_l_e(self: *CPU) void {
-        self.l = self.e;
-    }
-    fn ld_l_h(self: *CPU) void {
-        self.l = self.h;
-    }
-    fn ld_l_l(self: *CPU) void {
-        _ = self;
-    }
-    fn ld_l_hl_ptr(self: *CPU) void {
-        self.l = self.memory[self.getHL()];
-    }
-    fn ld_l_a(self: *CPU) void {
-        self.l = self.a;
-    }
-
-    fn ld_hl_ptr_b(self: *CPU) void {
-        self.memory[self.getHL()] = self.b;
-    }
-    fn ld_hl_ptr_c(self: *CPU) void {
-        self.memory[self.getHL()] = self.c;
-    }
-    fn ld_hl_ptr_d(self: *CPU) void {
-        self.memory[self.getHL()] = self.d;
-    }
-    fn ld_hl_ptr_e(self: *CPU) void {
-        self.memory[self.getHL()] = self.e;
-    }
-    fn ld_hl_ptr_h(self: *CPU) void {
-        self.memory[self.getHL()] = self.h;
-    }
-    fn ld_hl_ptr_l(self: *CPU) void {
-        self.memory[self.getHL()] = self.l;
-    }
-    fn ld_hl_ptr_a(self: *CPU) void {
-        self.memory[self.getHL()] = self.a;
-    }
-
-    fn ld_a_b(self: *CPU) void {
-        self.a = self.b;
-    }
-    fn ld_a_c(self: *CPU) void {
-        self.a = self.c;
-    }
-    fn ld_a_d(self: *CPU) void {
-        self.a = self.d;
-    }
-    fn ld_a_e(self: *CPU) void {
-        self.a = self.e;
-    }
-    fn ld_a_h(self: *CPU) void {
-        self.a = self.h;
-    }
-    fn ld_a_l(self: *CPU) void {
-        self.a = self.l;
-    }
-    fn ld_a_hl_ptr(self: *CPU) void {
-        self.a = self.memory[self.getHL()];
-    }
-    fn ld_a_a(self: *CPU) void {
-        _ = self;
     }
 
     fn halt(self: *CPU) void {
@@ -926,64 +693,9 @@ pub const CPU = struct {
         self.unsetFlag(.h);
     }
 
-    fn and_b(self: *CPU) void {
-        self.a &= self.b;
-        self.checkFlag(.z, self.a == 0);
-        self.unsetFlag(.n);
-        self.setFlag(.h);
-        self.unsetFlag(.c);
-    }
-
-    fn and_c(self: *CPU) void {
-        self.a &= self.c;
-        self.checkFlag(.z, self.a == 0);
-        self.unsetFlag(.n);
-        self.setFlag(.h);
-        self.unsetFlag(.c);
-    }
-
-    fn and_d(self: *CPU) void {
-        self.a &= self.d;
-        self.checkFlag(.z, self.a == 0);
-        self.unsetFlag(.n);
-        self.setFlag(.h);
-        self.unsetFlag(.c);
-    }
-
-    fn and_e(self: *CPU) void {
-        self.a &= self.e;
-        self.checkFlag(.z, self.a == 0);
-        self.unsetFlag(.n);
-        self.setFlag(.h);
-        self.unsetFlag(.c);
-    }
-
-    fn and_h(self: *CPU) void {
-        self.a &= self.h;
-        self.checkFlag(.z, self.a == 0);
-        self.unsetFlag(.n);
-        self.setFlag(.h);
-        self.unsetFlag(.c);
-    }
-
-    fn and_l(self: *CPU) void {
-        self.a &= self.l;
-        self.checkFlag(.z, self.a == 0);
-        self.unsetFlag(.n);
-        self.setFlag(.h);
-        self.unsetFlag(.c);
-    }
 
     fn and_hl_ptr(self: *CPU) void {
         self.a &= self.memory[self.getHL()];
-        self.checkFlag(.z, self.a == 0);
-        self.unsetFlag(.n);
-        self.setFlag(.h);
-        self.unsetFlag(.c);
-    }
-
-    fn and_a(self: *CPU) void {
-        self.a &= self.a;
         self.checkFlag(.z, self.a == 0);
         self.unsetFlag(.n);
         self.setFlag(.h);
@@ -1000,64 +712,9 @@ pub const CPU = struct {
         self.unsetFlag(.c);
     }
 
-    fn or_b(self: *CPU) void {
-        self.a |= self.b;
-        self.checkFlag(.z, self.a == 0);
-        self.unsetFlag(.n);
-        self.unsetFlag(.h);
-        self.unsetFlag(.c);
-    }
-
-    fn or_c(self: *CPU) void {
-        self.a |= self.c;
-        self.checkFlag(.z, self.a == 0);
-        self.unsetFlag(.n);
-        self.unsetFlag(.h);
-        self.unsetFlag(.c);
-    }
-
-    fn or_d(self: *CPU) void {
-        self.a |= self.d;
-        self.checkFlag(.z, self.a == 0);
-        self.unsetFlag(.n);
-        self.unsetFlag(.h);
-        self.unsetFlag(.c);
-    }
-
-    fn or_e(self: *CPU) void {
-        self.a |= self.e;
-        self.checkFlag(.z, self.a == 0);
-        self.unsetFlag(.n);
-        self.unsetFlag(.h);
-        self.unsetFlag(.c);
-    }
-
-    fn or_h(self: *CPU) void {
-        self.a |= self.h;
-        self.checkFlag(.z, self.a == 0);
-        self.unsetFlag(.n);
-        self.unsetFlag(.h);
-        self.unsetFlag(.c);
-    }
-
-    fn or_l(self: *CPU) void {
-        self.a |= self.l;
-        self.checkFlag(.z, self.a == 0);
-        self.unsetFlag(.n);
-        self.unsetFlag(.h);
-        self.unsetFlag(.c);
-    }
 
     fn or_hl_ptr(self: *CPU) void {
         self.a |= self.memory[self.getHL()];
-        self.checkFlag(.z, self.a == 0);
-        self.unsetFlag(.n);
-        self.unsetFlag(.h);
-        self.unsetFlag(.c);
-    }
-
-    fn or_a(self: *CPU) void {
-        self.a |= self.a;
         self.checkFlag(.z, self.a == 0);
         self.unsetFlag(.n);
         self.unsetFlag(.h);
@@ -1074,53 +731,6 @@ pub const CPU = struct {
         self.unsetFlag(.c);
     }
 
-    fn xor_b(self: *CPU) void {
-        self.a ^= self.b;
-        self.checkFlag(.z, self.a == 0);
-        self.unsetFlag(.n);
-        self.unsetFlag(.h);
-        self.unsetFlag(.c);
-    }
-
-    fn xor_c(self: *CPU) void {
-        self.a ^= self.c;
-        self.checkFlag(.z, self.a == 0);
-        self.unsetFlag(.n);
-        self.unsetFlag(.h);
-        self.unsetFlag(.c);
-    }
-
-    fn xor_d(self: *CPU) void {
-        self.a ^= self.d;
-        self.checkFlag(.z, self.a == 0);
-        self.unsetFlag(.n);
-        self.unsetFlag(.h);
-        self.unsetFlag(.c);
-    }
-
-    fn xor_e(self: *CPU) void {
-        self.a ^= self.e;
-        self.checkFlag(.z, self.a == 0);
-        self.unsetFlag(.n);
-        self.unsetFlag(.h);
-        self.unsetFlag(.c);
-    }
-
-    fn xor_h(self: *CPU) void {
-        self.a ^= self.h;
-        self.checkFlag(.z, self.a == 0);
-        self.unsetFlag(.n);
-        self.unsetFlag(.h);
-        self.unsetFlag(.c);
-    }
-
-    fn xor_l(self: *CPU) void {
-        self.a ^= self.l;
-        self.checkFlag(.z, self.a == 0);
-        self.unsetFlag(.n);
-        self.unsetFlag(.h);
-        self.unsetFlag(.c);
-    }
 
     fn xor_hl_ptr(self: *CPU) void {
         self.a ^= self.memory[self.getHL()];
@@ -1130,13 +740,6 @@ pub const CPU = struct {
         self.unsetFlag(.c);
     }
 
-    fn xor_a(self: *CPU) void {
-        self.a ^= self.a;
-        self.checkFlag(.z, self.a == 0);
-        self.unsetFlag(.n);
-        self.unsetFlag(.h);
-        self.unsetFlag(.c);
-    }
 
     fn xor_d8(self: *CPU) void {
         const value = self.memory[self.pc];
@@ -1162,9 +765,42 @@ pub const CPU = struct {
         self.updateFlags(u8, old, self.b + carry, self.a, true);
     }
 
+
+    fn cp_hl_ptr(self: *CPU) void {
+        const value = self.memory[self.getHL()];
+        const result = self.a -% value;
+        self.checkFlag(.z, result == 0);
+        self.setFlag(.n);
+        self.checkFlag(.h, (self.a & 0x0F) < (value & 0x0F));
+        self.checkFlag(.c, self.a < value);
+    }
+
+    fn cp_d8(self: *CPU) void {
+        const value = self.memory[self.pc];
+        self.pc += 1;
+        const result = self.a -% value;
+        self.checkFlag(.z, result == 0);
+        self.setFlag(.n);
+        self.checkFlag(.h, (self.a & 0x0F) < (value & 0x0F));
+        self.checkFlag(.c, self.a < value);
+    }
+
     fn unknown_opcode(self: *CPU) void {
         _ = self;
         @panic("Unknown opcode");
+    }
+
+    fn getRegister(self: *CPU, comptime reg: Register) *u8 {
+        return switch (reg) {
+            .a => &self.a,
+            .f => &self.f,
+            .b => &self.b,
+            .c => &self.c,
+            .d => &self.d,
+            .e => &self.e,
+            .h => &self.h,
+            .l => &self.l,
+        };
     }
 
     // Helper functions
@@ -1240,4 +876,3 @@ pub const CPU = struct {
         }
     }
 };
-

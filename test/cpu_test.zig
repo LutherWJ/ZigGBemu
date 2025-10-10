@@ -933,3 +933,264 @@ test "RRA instruction - 9-bit rotation behavior" {
     try std.testing.expectEqual(@as(u8, 0b00010000), c.f); // Carry back to 1
     try std.testing.expectEqual(@as(u16, 9), c.pc);
 }
+
+// ============================================================================
+// CP (0xB8-0xBF, 0xFE) - Compare A with operand Tests
+// Specification: Subtract operand from A but don't store result, only set flags
+// Flags: Z=1 if equal, N=1 (always), H=1 if borrow from bit 4, C=1 if operand > A
+// ============================================================================
+
+test "CP B - equal values (A == B)" {
+    var c = cpu.CPU{};
+    c.a = 0x42;
+    c.b = 0x42;
+    c.memory[0] = 0xB8; // CP B
+
+    try c.step();
+
+    // A should be unchanged
+    try std.testing.expectEqual(@as(u8, 0x42), c.a);
+    // Flags: Z=1 (equal), N=1, H=0, C=0
+    try std.testing.expectEqual(@as(u8, 0b11000000), c.f);
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
+}
+
+test "CP B - A > B" {
+    var c = cpu.CPU{};
+    c.a = 0x50;
+    c.b = 0x30;
+    c.memory[0] = 0xB8; // CP B
+
+    try c.step();
+
+    // A should be unchanged
+    try std.testing.expectEqual(@as(u8, 0x50), c.a);
+    // Flags: Z=0 (not equal), N=1, H=0, C=0
+    try std.testing.expectEqual(@as(u8, 0b01000000), c.f);
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
+}
+
+test "CP B - A < B (sets carry)" {
+    var c = cpu.CPU{};
+    c.a = 0x30;
+    c.b = 0x50;
+    c.memory[0] = 0xB8; // CP B
+
+    try c.step();
+
+    // A should be unchanged
+    try std.testing.expectEqual(@as(u8, 0x30), c.a);
+    // Flags: Z=0, N=1, H=0 (no borrow from bit 4: 0x0 - 0x0), C=1
+    try std.testing.expectEqual(@as(u8, 0b01010000), c.f);
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
+}
+
+test "CP C - half carry flag test" {
+    var c = cpu.CPU{};
+    c.a = 0x10;
+    c.c = 0x01;
+    c.memory[0] = 0xB9; // CP C
+
+    try c.step();
+
+    // A should be unchanged
+    try std.testing.expectEqual(@as(u8, 0x10), c.a);
+    // Flags: Z=0, N=1, H=1 (borrow from bit 4: lower nibble 0x0 - 0x1), C=0
+    try std.testing.expectEqual(@as(u8, 0b01100000), c.f);
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
+}
+
+test "CP D - half carry flag set" {
+    var c = cpu.CPU{};
+    c.a = 0x1E; // 0001 1110
+    c.d = 0x0F; // 0000 1111
+    c.memory[0] = 0xBA; // CP D
+
+    try c.step();
+
+    // A should be unchanged
+    try std.testing.expectEqual(@as(u8, 0x1E), c.a);
+    // Flags: Z=0, N=1, H=1 (borrow from bit 4: 0xE - 0xF requires borrow), C=0
+    try std.testing.expectEqual(@as(u8, 0b01100000), c.f);
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
+}
+
+test "CP E - zero flag with 0x00" {
+    var c = cpu.CPU{};
+    c.a = 0x00;
+    c.e = 0x00;
+    c.memory[0] = 0xBB; // CP E
+
+    try c.step();
+
+    // A should be unchanged
+    try std.testing.expectEqual(@as(u8, 0x00), c.a);
+    // Flags: Z=1, N=1, H=0, C=0
+    try std.testing.expectEqual(@as(u8, 0b11000000), c.f);
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
+}
+
+test "CP H - comparing 0xFF values" {
+    var c = cpu.CPU{};
+    c.a = 0xFF;
+    c.h = 0xFF;
+    c.memory[0] = 0xBC; // CP H
+
+    try c.step();
+
+    // A should be unchanged
+    try std.testing.expectEqual(@as(u8, 0xFF), c.a);
+    // Flags: Z=1, N=1, H=0, C=0
+    try std.testing.expectEqual(@as(u8, 0b11000000), c.f);
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
+}
+
+test "CP L - edge case A=0x00, L=0xFF" {
+    var c = cpu.CPU{};
+    c.a = 0x00;
+    c.l = 0xFF;
+    c.memory[0] = 0xBD; // CP L
+
+    try c.step();
+
+    // A should be unchanged
+    try std.testing.expectEqual(@as(u8, 0x00), c.a);
+    // Flags: Z=0, N=1, H=1, C=1 (0x00 < 0xFF)
+    try std.testing.expectEqual(@as(u8, 0b01110000), c.f);
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
+}
+
+test "CP (HL) - memory comparison" {
+    var c = cpu.CPU{};
+    c.a = 0x80;
+    c.h = 0x20;
+    c.l = 0x00;
+    c.memory[0] = 0xBE; // CP (HL)
+    c.memory[0x2000] = 0x80;
+
+    try c.step();
+
+    // A should be unchanged
+    try std.testing.expectEqual(@as(u8, 0x80), c.a);
+    // Flags: Z=1 (equal), N=1, H=0, C=0
+    try std.testing.expectEqual(@as(u8, 0b11000000), c.f);
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
+}
+
+test "CP (HL) - memory comparison with A < (HL)" {
+    var c = cpu.CPU{};
+    c.a = 0x10;
+    c.h = 0x30;
+    c.l = 0x50;
+    c.memory[0] = 0xBE; // CP (HL)
+    c.memory[0x3050] = 0x20;
+
+    try c.step();
+
+    // A should be unchanged
+    try std.testing.expectEqual(@as(u8, 0x10), c.a);
+    // Flags: Z=0, N=1, H=0 (0x0 - 0x0 in lower nibble), C=1
+    try std.testing.expectEqual(@as(u8, 0b01010000), c.f);
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
+}
+
+test "CP A - comparing A with itself" {
+    var c = cpu.CPU{};
+    c.a = 0x42;
+    c.memory[0] = 0xBF; // CP A
+
+    try c.step();
+
+    // A should be unchanged
+    try std.testing.expectEqual(@as(u8, 0x42), c.a);
+    // Flags: Z=1 (always equal to itself), N=1, H=0, C=0
+    try std.testing.expectEqual(@as(u8, 0b11000000), c.f);
+    try std.testing.expectEqual(@as(u16, 1), c.pc);
+}
+
+test "CP d8 - immediate value equal" {
+    var c = cpu.CPU{};
+    c.a = 0x99;
+    c.memory[0] = 0xFE; // CP d8
+    c.memory[1] = 0x99;
+
+    try c.step();
+
+    // A should be unchanged
+    try std.testing.expectEqual(@as(u8, 0x99), c.a);
+    // Flags: Z=1, N=1, H=0, C=0
+    try std.testing.expectEqual(@as(u8, 0b11000000), c.f);
+    try std.testing.expectEqual(@as(u16, 2), c.pc);
+}
+
+test "CP d8 - immediate value A > operand" {
+    var c = cpu.CPU{};
+    c.a = 0xAA;
+    c.memory[0] = 0xFE; // CP d8
+    c.memory[1] = 0x55;
+
+    try c.step();
+
+    // A should be unchanged
+    try std.testing.expectEqual(@as(u8, 0xAA), c.a);
+    // Flags: Z=0, N=1, H=0, C=0
+    try std.testing.expectEqual(@as(u8, 0b01000000), c.f);
+    try std.testing.expectEqual(@as(u16, 2), c.pc);
+}
+
+test "CP d8 - immediate value A < operand" {
+    var c = cpu.CPU{};
+    c.a = 0x20;
+    c.memory[0] = 0xFE; // CP d8
+    c.memory[1] = 0x40;
+
+    try c.step();
+
+    // A should be unchanged
+    try std.testing.expectEqual(@as(u8, 0x20), c.a);
+    // Flags: Z=0, N=1, H=0 (0x0 - 0x0 in lower nibble), C=1
+    try std.testing.expectEqual(@as(u8, 0b01010000), c.f);
+    try std.testing.expectEqual(@as(u16, 2), c.pc);
+}
+
+test "CP - N flag always set" {
+    var c = cpu.CPU{};
+    c.a = 0xFF;
+    c.b = 0x00;
+    c.f = 0b00000000; // All flags clear
+    c.memory[0] = 0xB8; // CP B
+
+    try c.step();
+
+    // N flag must be set (bit 6)
+    try std.testing.expectEqual(@as(u8, 1), (c.f >> 6) & 1);
+}
+
+test "CP - clears previous flags correctly" {
+    var c = cpu.CPU{};
+    c.a = 0x50;
+    c.c = 0x30;
+    c.f = 0b11110000; // All flags set initially
+    c.memory[0] = 0xB9; // CP C
+
+    try c.step();
+
+    // Should clear Z and C flags, keep N set, clear H
+    // Result: Z=0, N=1, H=0, C=0
+    try std.testing.expectEqual(@as(u8, 0b01000000), c.f);
+}
+
+test "CP - sequence with conditional jump use case" {
+    var c = cpu.CPU{};
+    c.a = 0x10;
+    c.memory[0] = 0xFE; // CP d8
+    c.memory[1] = 0x10;
+    c.memory[2] = 0x28; // JR Z, +2 (would jump if equal)
+    c.memory[3] = 0x02;
+
+    try c.step(); // CP d8
+
+    // After CP, Z flag should be set (A == 0x10)
+    try std.testing.expectEqual(@as(u8, 0b11000000), c.f);
+    try std.testing.expectEqual(@as(u16, 2), c.pc);
+}
