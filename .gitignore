@@ -1,5 +1,7 @@
 zig-out/
 .idea/
 .zig-cache/
+devtools/
+zig-out/
 ZigGBemu.iml
 CLAUDE.md
