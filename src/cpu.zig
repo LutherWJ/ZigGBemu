@@ -5,11 +5,13 @@
 // of conciseness. This works completely fine as well though.
 
 const std = @import("std");
+const Memory = @import("memory.zig").Memory;
 
 const InstructionFn = *const fn (*CPU) void;
 const Flag = enum(u3) { z = 7, n = 6, h = 5, c = 4 };
 const Register = enum { a, f, b, c, d, e, h, l };
-const RegisterPair = enum { bc, de, hl, af };
+const U16Register = enum { bc, de, hl, af, sp, pc };
+const Conditions = enum { always, nz, z, nc, c }; // Used for conditional instructions like CALL or JP
 
 // Comptime function generators for reducing boilerplate
 fn makeLdRegReg(comptime dst: Register, comptime src: Register) InstructionFn {
@@ -23,24 +25,24 @@ fn makeLdRegReg(comptime dst: Register, comptime src: Register) InstructionFn {
 fn makeLdRegHlPtr(comptime dst: Register) InstructionFn {
     return struct {
         fn f(cpu: *CPU) void {
-            cpu.getRegister(dst).* = cpu.memory[cpu.getRegisterPair(.hl)];
+            cpu.getRegister(dst).* = cpu.memory[cpu.getU16Register(.hl)];
         }
     }.f;
 }
 
-fn makeLdRegU16Ptr(comptime dst: Register, comptime src: RegisterPair) InstructionFn {
+fn makeLdRegU16Ptr(comptime dst: Register, comptime src: U16Register) InstructionFn {
     return struct {
         fn f(cpu: *CPU) void {
-            const address = cpu.getRegisterPair(src);
+            const address = cpu.getU16Register(src);
             cpu.getRegister(dst).* = cpu.memory[address];
         }
     }.f;
 }
 
-fn makeLdU16PtrReg(comptime dst: RegisterPair, comptime src: Register) InstructionFn {
+fn makeLdU16PtrReg(comptime dst: U16Register, comptime src: Register) InstructionFn {
     return struct {
         fn f(cpu: *CPU) void {
-            const address = cpu.getRegisterPair(dst);
+            const address = cpu.getU16Register(dst);
             cpu.memory[address] = cpu.getRegister(src).*;
         }
     }.f;
@@ -55,12 +57,12 @@ fn makeLdRegD8(comptime dst: Register) InstructionFn {
     }.f;
 }
 
-fn makeLdU16RegD16(comptime dst: RegisterPair) InstructionFn {
+fn makeLdU16RegD16(comptime dst: U16Register) InstructionFn {
     return struct {
         fn f(cpu: *CPU) void {
             const d16 = std.mem.readInt(u16, cpu.memory[cpu.pc..][0..2], .little);
             cpu.pc += 2;
-            cpu.setRegisterPair(dst, d16);
+            cpu.setU16Register(dst, d16);
         }
     }.f;
 }
@@ -68,7 +70,7 @@ fn makeLdU16RegD16(comptime dst: RegisterPair) InstructionFn {
 fn makeLdHlPtrReg(comptime src: Register) InstructionFn {
     return struct {
         fn f(cpu: *CPU) void {
-            cpu.memory[cpu.getRegisterPair(.hl)] = cpu.getRegister(src).*;
+            cpu.memory[cpu.getU16Register(.hl)] = cpu.getRegister(src).*;
         }
     }.f;
 }
@@ -170,46 +172,36 @@ fn makeDecReg(comptime dst: Register) InstructionFn {
 }
 
 // Simple 16-bit inc/dec (don't affect flags)
-fn makeIncU16Reg(comptime dst: RegisterPair) InstructionFn {
+fn makeIncU16Reg(comptime dst: U16Register) InstructionFn {
     return struct {
         fn f(cpu: *CPU) void {
-            cpu.setRegisterPair(dst, cpu.getRegisterPair(dst) +% 1);
+            cpu.setU16Register(dst, cpu.getU16Register(dst) +% 1);
         }
     }.f;
 }
 
-fn makeDecU16Reg(comptime dst: RegisterPair) InstructionFn {
+fn makeDecU16Reg(comptime dst: U16Register) InstructionFn {
     return struct {
         fn f(cpu: *CPU) void {
-            cpu.setRegisterPair(dst, cpu.getRegisterPair(dst) -% 1);
+            cpu.setU16Register(dst, cpu.getU16Register(dst) -% 1);
         }
     }.f;
 }
 
 // ADD HL generator
-const Add16Source = enum { bc, de, hl, sp };
-
-fn makeAddHl(comptime src: Add16Source) InstructionFn {
+fn makeAddHl(comptime src: U16Register) InstructionFn {
     return struct {
         fn f(cpu: *CPU) void {
-            const hl = cpu.getRegisterPair(.hl);
-            const value = switch (src) {
-                .bc => cpu.getRegisterPair(.bc),
-                .de => cpu.getRegisterPair(.de),
-                .hl => cpu.getRegisterPair(.hl),
-                .sp => cpu.sp,
-            };
+            const hl = cpu.getU16Register(.hl);
+            const value = cpu.getU16Register(src);
             const result = hl +% value;
             cpu.updateFlags(u16, hl, value, result, false);
-            cpu.setRegisterPair(.hl, result);
+            cpu.setU16Register(.hl, result);
         }
     }.f;
 }
 
-// Conditional jump generator
-const JumpCondition = enum { always, nz, z, nc, c };
-
-fn makeJumpRelative(comptime cond: JumpCondition) InstructionFn {
+fn makeJumpRelative(comptime cond: Conditions) InstructionFn {
     return struct {
         fn f(cpu: *CPU) void {
             const offset: i8 = @bitCast(cpu.memory[cpu.pc]);
@@ -232,15 +224,34 @@ fn makeJumpRelative(comptime cond: JumpCondition) InstructionFn {
     }.f;
 }
 
-fn makePush(comptime pair: RegisterPair) InstructionFn {
+fn makeCall(comptime cond: Conditions) InstructionFn {
     return struct {
         fn f(cpu: *CPU) void {
-            const value = switch (pair) {
-                .bc => cpu.getRegisterPair(.bc),
-                .de => cpu.getRegisterPair(.de),
-                .hl => cpu.getRegisterPair(.hl),
-                .af => (@as(u16, cpu.a) << 8) | cpu.f,
+            const address: u16 = std.mem.readInt(u16, cpu.memory[cpu.pc..][0..2], .little);
+            cpu.pc +%= 2;
+
+            const should_call = switch (cond) {
+                .always => true,
+                .nz => (cpu.f & 0b10000000) != 0b10000000,
+                .z => (cpu.f & 0b10000000) == 0b10000000,
+                .nc => (cpu.f & 0b00010000) != 0b00010000,
+                .c => (cpu.f & 0b00010000) == 0b00010000,
             };
+
+            if (should_call) {
+                cpu.sp -%= 2;
+                const value = std.mem.readInt(u16, cpu.memory[cpu.pc..][0..2], .little);
+                std.mem.writeInt(u16, cpu.memory[cpu.sp..][0..2], value, .little);
+                cpu.pc = address;
+            }
+        }
+    }.f;
+}
+
+fn makePush(comptime pair: U16Register) InstructionFn {
+    return struct {
+        fn f(cpu: *CPU) void {
+            const value = cpu.getU16Register(pair);
             cpu.sp -%= 1;
             cpu.memory[cpu.sp] = @truncate(value >> 8); // High byte
             cpu.sp -%= 1;
@@ -249,7 +260,7 @@ fn makePush(comptime pair: RegisterPair) InstructionFn {
     }.f;
 }
 
-fn makePop(comptime pair: RegisterPair) InstructionFn {
+fn makePop(comptime pair: U16Register) InstructionFn {
     return struct {
         fn f(cpu: *CPU) void {
             const low = cpu.memory[cpu.sp];
@@ -257,16 +268,7 @@ fn makePop(comptime pair: RegisterPair) InstructionFn {
             const high = cpu.memory[cpu.sp];
             cpu.sp +%= 1;
             const value = (@as(u16, high) << 8) | low;
-
-            switch (pair) {
-                .bc => cpu.setRegisterPair(.bc, value),
-                .de => cpu.setRegisterPair(.de, value),
-                .hl => cpu.setRegisterPair(.hl, value),
-                .af => {
-                    cpu.a = @truncate(value >> 8);
-                    cpu.f = @truncate(value);
-                },
-            }
+            cpu.setU16Register(pair, value);
         }
     }.f;
 }
@@ -422,10 +424,15 @@ const instruction_table = blk: {
     table[0xBF] = makeCpReg(.a);
     table[0xC1] = makePop(.bc);
     table[0xC5] = makePush(.bc);
+    table[0xC4] = makeCall(.nz);
     table[0xC6] = CPU.add_a_d8;
+    table[0xCC] = makeCall(.z);
     table[0xD1] = makePop(.de);
+    table[0xD4] = makeCall(.nc);
     table[0xD5] = makePush(.de);
     table[0xD6] = CPU.sub_a_d8;
+    table[0xDC] = makeCall(.c);
+    table[0xDD] = makeCall(.always);
     table[0xE1] = makePop(.hl);
     table[0xE5] = makePush(.hl);
     table[0xF1] = makePop(.af);
@@ -447,7 +454,8 @@ pub const CPU = struct {
     sp: u16 = 0, // stack pointer
     pc: u16 = 0, // program counter
 
-    stopped: bool = false,
+    stopped: u1 = 0,
+    ime_flag: u1 = 0, // TODO: implement halt hardware bug later down the line
     memory: [0x10000]u8 = undefined,
 
     pub fn step(self: *CPU) !void {
@@ -462,27 +470,27 @@ pub const CPU = struct {
     }
 
     fn ld_hl_ptr_plus_a(self: *CPU) void {
-        const address = self.getRegisterPair(.hl);
+        const address = self.getU16Register(.hl);
         self.memory[address] = self.a;
-        self.setRegisterPair(.hl, self.getRegisterPair(.hl) + 1);
+        self.setU16Register(.hl, self.getU16Register(.hl) + 1);
     }
 
     fn ld_a_hl_ptr_plus(self: *CPU) void {
-        const address = self.getRegisterPair(.hl);
+        const address = self.getU16Register(.hl);
         self.a = self.memory[address];
-        self.setRegisterPair(.hl, self.getRegisterPair(.hl) + 1);
+        self.setU16Register(.hl, self.getU16Register(.hl) + 1);
     }
 
     fn ld_hl_ptr_minus_a(self: *CPU) void {
-        const address = self.getRegisterPair(.hl);
+        const address = self.getU16Register(.hl);
         self.memory[address] = self.a;
-        self.setRegisterPair(.hl, self.getRegisterPair(.hl) - 1);
+        self.setU16Register(.hl, self.getU16Register(.hl) - 1);
     }
 
     fn ld_a_hl_ptr_minus(self: *CPU) void {
-        const address = self.getRegisterPair(.hl);
+        const address = self.getU16Register(.hl);
         self.a = self.memory[address];
-        self.setRegisterPair(.hl, self.getRegisterPair(.hl) - 1);
+        self.setU16Register(.hl, self.getU16Register(.hl) - 1);
     }
 
     fn rlca(self: *CPU) void {
@@ -542,8 +550,8 @@ pub const CPU = struct {
     }
 
     fn dec_HL(self: *CPU) void {
-        const old = self.getRegisterPair(.hl);
-        self.setRegisterPair(.hl, old -% 1);
+        const old = self.getU16Register(.hl);
+        self.setU16Register(.hl, old -% 1);
         self.updateFlags(u16, old, 1, true);
     }
 
@@ -553,7 +561,7 @@ pub const CPU = struct {
     }
 
     fn inc_hl_ptr(self: *CPU) void {
-        const address = self.getRegisterPair(.hl);
+        const address = self.getU16Register(.hl);
         const old = self.memory[address];
         self.memory[address] +%= 1;
         self.updateFlags(u8, old, 1, self.memory[address], false);
@@ -564,7 +572,7 @@ pub const CPU = struct {
     }
 
     fn dec_hl_ptr(self: *CPU) void {
-        const address = self.getRegisterPair(.hl);
+        const address = self.getU16Register(.hl);
         const old = self.memory[address];
         self.memory[address] -%= 1;
         self.updateFlags(u8, old, 1, self.memory[address], true);
@@ -575,7 +583,7 @@ pub const CPU = struct {
     }
 
     fn add_a_hl_ptr(self: *CPU) void {
-        const address = self.getRegisterPair(.hl);
+        const address = self.getU16Register(.hl);
         const old = self.a;
         const value = self.memory[address];
         self.a +%= value;
@@ -591,7 +599,7 @@ pub const CPU = struct {
     }
 
     fn sub_a_hl_ptr(self: *CPU) void {
-        const address = self.getRegisterPair(.hl);
+        const address = self.getU16Register(.hl);
         const old = self.a;
         const value = self.memory[address];
         self.a -%= value;
@@ -614,7 +622,7 @@ pub const CPU = struct {
     fn ld_hl_ptr_d8(self: *CPU) void {
         const value = self.memory[self.pc];
         self.pc += 1;
-        self.memory[self.getRegisterPair(.hl)] = value;
+        self.memory[self.getU16Register(.hl)] = value;
     }
 
     fn daa(self: *CPU) void {
@@ -662,7 +670,7 @@ pub const CPU = struct {
     }
 
     fn and_hl_ptr(self: *CPU) void {
-        self.a &= self.memory[self.getRegisterPair(.hl)];
+        self.a &= self.memory[self.getU16Register(.hl)];
         self.checkFlag(.z, self.a == 0);
         self.unsetFlag(.n);
         self.setFlag(.h);
@@ -680,7 +688,7 @@ pub const CPU = struct {
     }
 
     fn or_hl_ptr(self: *CPU) void {
-        self.a |= self.memory[self.getRegisterPair(.hl)];
+        self.a |= self.memory[self.getU16Register(.hl)];
         self.checkFlag(.z, self.a == 0);
         self.unsetFlag(.n);
         self.unsetFlag(.h);
@@ -698,7 +706,7 @@ pub const CPU = struct {
     }
 
     fn xor_hl_ptr(self: *CPU) void {
-        self.a ^= self.memory[self.getRegisterPair(.hl)];
+        self.a ^= self.memory[self.getU16Register(.hl)];
         self.checkFlag(.z, self.a == 0);
         self.unsetFlag(.n);
         self.unsetFlag(.h);
@@ -730,7 +738,7 @@ pub const CPU = struct {
     }
 
     fn cp_hl_ptr(self: *CPU) void {
-        const value = self.memory[self.getRegisterPair(.hl)];
+        const value = self.memory[self.getU16Register(.hl)];
         const result = self.a -% value;
         self.checkFlag(.z, result == 0);
         self.setFlag(.n);
@@ -753,6 +761,7 @@ pub const CPU = struct {
         @panic("Unknown opcode");
     }
 
+    // Helper functions
     fn getRegister(self: *CPU, comptime reg: Register) *u8 {
         return switch (reg) {
             .a => &self.a,
@@ -766,17 +775,18 @@ pub const CPU = struct {
         };
     }
 
-    // Helper functions
-
-    fn getRegisterPair(self: *CPU, comptime pair: RegisterPair) u16 {
-        switch (pair) {
-            .bc => return (@as(u16, self.b) << 8) | self.c,
-            .de => return (@as(u16, self.d) << 8) | self.e,
-            .hl => return (@as(u16, self.h) << 8) | self.l,
-        }
+    fn getU16Register(self: *CPU, comptime pair: U16Register) u16 {
+        return switch (pair) {
+            .bc => (@as(u16, self.b) << 8) | self.c,
+            .de => (@as(u16, self.d) << 8) | self.e,
+            .hl => (@as(u16, self.h) << 8) | self.l,
+            .af => (@as(u16, self.a) << 8) | self.f,
+            .sp => self.sp,
+            .pc => self.pc,
+        };
     }
 
-    fn setRegisterPair(self: *CPU, comptime pair: RegisterPair, val: u16) void {
+    fn setU16Register(self: *CPU, comptime pair: U16Register, val: u16) void {
         switch (pair) {
             .bc => {
                 self.b = @truncate(val >> 8);
@@ -790,6 +800,12 @@ pub const CPU = struct {
                 self.h = @truncate(val >> 8);
                 self.l = @truncate(val);
             },
+            .af => {
+                self.a = @truncate(val >> 8);
+                self.f = @truncate(val);
+            },
+            .sp => self.sp = val,
+            .pc => self.pc = val,
         }
     }
 
