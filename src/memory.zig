@@ -2,7 +2,7 @@ const std = @import("std");
 const readInt = std.mem.readInt;
 const writeInt = std.mem.writeInt;
 
-pub const InteruptBit = enum(u3) {
+pub const InterruptBit = enum(u3) {
     vblank = 0,
     lcd = 1,
     timer = 2,
@@ -25,10 +25,10 @@ const IF_ADDRESS: u16 = 0xFF0F;
 pub const Memory = struct {
     ram: [0x10000]u8 = undefined,
 
-    pub fn read(self: *Memory, address: u16, return_type: type) return_type {
-        if (return_type == u8) {
+    pub fn read(self: *Memory, address: u16, comptime T: type) T {
+        if (T == u8) {
             return self.ram[address];
-        } else if (return_type == u16){
+        } else if (T == u16){
             return readInt(u16, self.ram[address..][0..2], .little);
         } else {
             @compileError("Memory.read only supports u8 and u16 types");
@@ -51,30 +51,30 @@ pub const Memory = struct {
         self.ram = rom;
     }
 
-    pub fn enableInturrupt(self: *Memory, comptime interrupt: InteruptBit) void {
+    pub fn enableInturrupt(self: *Memory, comptime interrupt: InterruptBit) void {
         self.ram[IE_ADDRESS] |= (1 << @intFromEnum(interrupt));
     }
 
-    pub fn clearInterrupt(self: *Memory, comptime interrupt: InteruptBit) void {
-        self.ram[IE_ADDRESS] &= (0 << @intFromEnum(interrupt));
+    pub fn clearInterrupt(self: *Memory, comptime interrupt: InterruptBit) void {
+        self.ram[IE_ADDRESS] &= ~(@as(u8, 1) << @intFromEnum(interrupt));
     }
 
-    pub fn requestInterrupt(self: *Memory, comptime interrupt: InteruptBit) void {
-        self.ram[IF_ADDRESS] |= (1 << @intFromEnum(interrupt));
+    pub fn requestInterrupt(self: *Memory, comptime interrupt: InterruptBit) void {
+        self.ram[IF_ADDRESS] |= (@as(u8, 1) << @intFromEnum(interrupt));
     }
 
-    pub fn acknowledgeInterrupt(self: *Memory, comptime interrupt: InteruptBit) void {
-        self.ram[IF_ADDRESS] &= (0 << @intFromEnum(interrupt));
+    pub fn acknowledgeInterrupt(self: *Memory, interrupt: InterruptBit) void {
+        self.ram[IF_ADDRESS] &= ~(@as(u8, 1) << @intFromEnum(interrupt));
     }
 
-    pub fn checkInterrupt(self: *Memory, comptime interrupt: InteruptBit) bool {
+    pub fn checkInterrupt(self: *Memory, comptime interrupt: InterruptBit) bool {
         if ((self.ram[IE_ADDRESS] >> @intFromEnum(interrupt) & 1) == 1) {
             return true;
         }
         return false;
     }
 
-    pub fn getPendingInterrupt(self: *Memory) ?InteruptBit {
+    pub fn getPendingInterrupt(self: *Memory) ?InterruptBit {
         const enabled = self.ram[IE_ADDRESS];
         const requested = self.ram[IF_ADDRESS];
         const pending = enabled & requested;

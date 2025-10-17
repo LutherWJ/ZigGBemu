@@ -6,12 +6,14 @@
 
 const std = @import("std");
 const Memory = @import("memory.zig").Memory;
+const InterruptBit = @import("memory.zig").InterruptBit;
 
 const InstructionFn = *const fn (*CPU) void;
 const Flag = enum(u3) { z = 7, n = 6, h = 5, c = 4 };
 const Register = enum { a, f, b, c, d, e, h, l };
 const U16Register = enum { bc, de, hl, af, sp, pc };
 const Conditions = enum { always, nz, z, nc, c }; // Used for conditional instructions like CALL or JP
+const ImeState = enum { disabled, enable_pending, enabled };
 
 // Comptime function generators for reducing boilerplate
 fn makeLdRegReg(comptime dst: Register, comptime src: Register) InstructionFn {
@@ -25,7 +27,7 @@ fn makeLdRegReg(comptime dst: Register, comptime src: Register) InstructionFn {
 fn makeLdRegHlPtr(comptime dst: Register) InstructionFn {
     return struct {
         fn f(cpu: *CPU) void {
-            cpu.getRegister(dst).* = cpu.memory[cpu.getU16Register(.hl)];
+            cpu.getRegister(dst).* = cpu.memory.read(cpu.getU16Register(.hl), u8);
         }
     }.f;
 }
@@ -34,7 +36,7 @@ fn makeLdRegU16Ptr(comptime dst: Register, comptime src: U16Register) Instructio
     return struct {
         fn f(cpu: *CPU) void {
             const address = cpu.getU16Register(src);
-            cpu.getRegister(dst).* = cpu.memory[address];
+            cpu.getRegister(dst).* = cpu.memory.read(address, u8);
         }
     }.f;
 }
@@ -43,7 +45,7 @@ fn makeLdU16PtrReg(comptime dst: U16Register, comptime src: Register) Instructio
     return struct {
         fn f(cpu: *CPU) void {
             const address = cpu.getU16Register(dst);
-            cpu.memory[address] = cpu.getRegister(src).*;
+            cpu.memory.write(address, cpu.getRegister(src).*);
         }
     }.f;
 }
@@ -51,7 +53,7 @@ fn makeLdU16PtrReg(comptime dst: U16Register, comptime src: Register) Instructio
 fn makeLdRegD8(comptime dst: Register) InstructionFn {
     return struct {
         fn f(cpu: *CPU) void {
-            cpu.getRegister(dst).* = cpu.memory[cpu.pc];
+            cpu.getRegister(dst).* = cpu.memory.read(cpu.pc, u8);
             cpu.pc += 1;
         }
     }.f;
@@ -60,7 +62,7 @@ fn makeLdRegD8(comptime dst: Register) InstructionFn {
 fn makeLdU16RegD16(comptime dst: U16Register) InstructionFn {
     return struct {
         fn f(cpu: *CPU) void {
-            const d16 = std.mem.readInt(u16, cpu.memory[cpu.pc..][0..2], .little);
+            const d16 = cpu.memory.read(cpu.pc, u16);
             cpu.pc += 2;
             cpu.setU16Register(dst, d16);
         }
@@ -70,7 +72,7 @@ fn makeLdU16RegD16(comptime dst: U16Register) InstructionFn {
 fn makeLdHlPtrReg(comptime src: Register) InstructionFn {
     return struct {
         fn f(cpu: *CPU) void {
-            cpu.memory[cpu.getU16Register(.hl)] = cpu.getRegister(src).*;
+            cpu.memory.write(cpu.getU16Register(.hl), cpu.getRegister(src).*);
         }
     }.f;
 }
@@ -81,7 +83,7 @@ fn makeAddReg(comptime src: Register) InstructionFn {
             const old = cpu.a;
             const value = cpu.getRegister(src).*;
             cpu.a +%= value;
-            cpu.updateFlags(u8, old, value, cpu.a, false);
+            cpu.updateMathFlags(u8, old, value, cpu.a, false);
         }
     }.f;
 }
@@ -92,7 +94,7 @@ fn makeSubReg(comptime src: Register) InstructionFn {
             const old = cpu.a;
             const value = cpu.getRegister(src).*;
             cpu.a -%= value;
-            cpu.updateFlags(u8, old, value, cpu.a, true);
+            cpu.updateMathFlags(u8, old, value, cpu.a, true);
         }
     }.f;
 }
@@ -155,7 +157,7 @@ fn makeIncReg(comptime dst: Register) InstructionFn {
             const reg = cpu.getRegister(dst);
             const old = reg.*;
             reg.* +%= 1;
-            cpu.updateFlags(u8, old, 1, reg.*, false);
+            cpu.updateIncFlags(old, reg.*, false);
         }
     }.f;
 }
@@ -166,12 +168,11 @@ fn makeDecReg(comptime dst: Register) InstructionFn {
             const reg = cpu.getRegister(dst);
             const old = reg.*;
             reg.* -%= 1;
-            cpu.updateFlags(u8, old, 1, reg.*, true);
+            cpu.updateIncFlags(old, reg.*, true);
         }
     }.f;
 }
 
-// Simple 16-bit inc/dec (don't affect flags)
 fn makeIncU16Reg(comptime dst: U16Register) InstructionFn {
     return struct {
         fn f(cpu: *CPU) void {
@@ -188,14 +189,13 @@ fn makeDecU16Reg(comptime dst: U16Register) InstructionFn {
     }.f;
 }
 
-// ADD HL generator
 fn makeAddHl(comptime src: U16Register) InstructionFn {
     return struct {
         fn f(cpu: *CPU) void {
             const hl = cpu.getU16Register(.hl);
             const value = cpu.getU16Register(src);
             const result = hl +% value;
-            cpu.updateFlags(u16, hl, value, result, false);
+            cpu.updateMathFlags(u16, hl, value, result, false);
             cpu.setU16Register(.hl, result);
         }
     }.f;
@@ -204,7 +204,7 @@ fn makeAddHl(comptime src: U16Register) InstructionFn {
 fn makeJumpRelative(comptime cond: Conditions) InstructionFn {
     return struct {
         fn f(cpu: *CPU) void {
-            const offset: i8 = @bitCast(cpu.memory[cpu.pc]);
+            const offset: i8 = @bitCast(cpu.memory.read(cpu.pc, u8));
             cpu.pc += 1;
 
             const should_jump = switch (cond) {
@@ -227,7 +227,7 @@ fn makeJumpRelative(comptime cond: Conditions) InstructionFn {
 fn makeCall(comptime cond: Conditions) InstructionFn {
     return struct {
         fn f(cpu: *CPU) void {
-            const address: u16 = std.mem.readInt(u16, cpu.memory[cpu.pc..][0..2], .little);
+            const address: u16 = cpu.memory.read(cpu.pc, u16);
             cpu.pc +%= 2;
 
             const should_call = switch (cond) {
@@ -239,9 +239,7 @@ fn makeCall(comptime cond: Conditions) InstructionFn {
             };
 
             if (should_call) {
-                cpu.sp -%= 2;
-                const value = std.mem.readInt(u16, cpu.memory[cpu.pc..][0..2], .little);
-                std.mem.writeInt(u16, cpu.memory[cpu.sp..][0..2], value, .little);
+                cpu.pushU16(cpu.pc);
                 cpu.pc = address;
             }
         }
@@ -252,10 +250,8 @@ fn makePush(comptime pair: U16Register) InstructionFn {
     return struct {
         fn f(cpu: *CPU) void {
             const value = cpu.getU16Register(pair);
-            cpu.sp -%= 1;
-            cpu.memory[cpu.sp] = @truncate(value >> 8); // High byte
-            cpu.sp -%= 1;
-            cpu.memory[cpu.sp] = @truncate(value); // Low byte
+            cpu.sp -%= 2;
+            cpu.memory.write(cpu.sp, value);
         }
     }.f;
 }
@@ -263,12 +259,18 @@ fn makePush(comptime pair: U16Register) InstructionFn {
 fn makePop(comptime pair: U16Register) InstructionFn {
     return struct {
         fn f(cpu: *CPU) void {
-            const low = cpu.memory[cpu.sp];
-            cpu.sp +%= 1;
-            const high = cpu.memory[cpu.sp];
-            cpu.sp +%= 1;
-            const value = (@as(u16, high) << 8) | low;
+            const value = cpu.memory.read(cpu.sp, u16);
+            cpu.sp +%= 2;
             cpu.setU16Register(pair, value);
+        }
+    }.f;
+}
+
+fn makeRST(comptime opcode: u8) InstructionFn {
+    return struct {
+        fn f(cpu: *CPU) void {
+            cpu.pushU16(cpu.pc);
+            cpu.pc = opcode & 0b00111000; // black magic
         }
     }.f;
 }
@@ -414,6 +416,27 @@ const instruction_table = blk: {
     table[0x95] = makeSubReg(.l);
     table[0x96] = CPU.sub_a_hl_ptr;
     table[0x97] = makeSubReg(.a);
+    table[0xA0] = makeAndReg(.b);
+    table[0xA1] = makeAndReg(.c);
+    table[0xA2] = makeAndReg(.d);
+    table[0xA3] = makeAndReg(.e);
+    table[0xA4] = makeAndReg(.h);
+    table[0xA5] = makeAndReg(.l);
+    table[0xA7] = makeAndReg(.a);
+    table[0xA8] = makeXorReg(.b);
+    table[0xA9] = makeXorReg(.c);
+    table[0xAA] = makeXorReg(.d);
+    table[0xAB] = makeXorReg(.e);
+    table[0xAC] = makeXorReg(.h);
+    table[0xAD] = makeXorReg(.l);
+    table[0xAF] = makeXorReg(.a);
+    table[0xB0] = makeOrReg(.b);
+    table[0xB1] = makeOrReg(.c);
+    table[0xB2] = makeOrReg(.d);
+    table[0xB3] = makeOrReg(.e);
+    table[0xB4] = makeOrReg(.h);
+    table[0xB5] = makeOrReg(.l);
+    table[0xB7] = makeOrReg(.a);
     table[0xB8] = makeCpReg(.b);
     table[0xB9] = makeCpReg(.c);
     table[0xBA] = makeCpReg(.d);
@@ -423,21 +446,32 @@ const instruction_table = blk: {
     table[0xBE] = CPU.cp_hl_ptr;
     table[0xBF] = makeCpReg(.a);
     table[0xC1] = makePop(.bc);
-    table[0xC5] = makePush(.bc);
     table[0xC4] = makeCall(.nz);
+    table[0xC5] = makePush(.bc);
     table[0xC6] = CPU.add_a_d8;
+    table[0xC7] = makeRST(0xC7);
     table[0xCC] = makeCall(.z);
+    table[0xCF] = makeRST(0xCF);
     table[0xD1] = makePop(.de);
     table[0xD4] = makeCall(.nc);
     table[0xD5] = makePush(.de);
     table[0xD6] = CPU.sub_a_d8;
+    table[0xD7] = makeRST(0xD7);
+    table[0xD9] = CPU.reti;
     table[0xDC] = makeCall(.c);
     table[0xDD] = makeCall(.always);
+    table[0xDF] = makeRST(0xDF);
     table[0xE1] = makePop(.hl);
     table[0xE5] = makePush(.hl);
+    table[0xE7] = makeRST(0xE7);
+    table[0xEF] = makeRST(0xEF);
     table[0xF1] = makePop(.af);
+    table[0xF3] = CPU.di;
     table[0xF5] = makePush(.af);
+    table[0xF7] = makeRST(0xF7);
+    table[0xFB] = CPU.ei;
     table[0xFE] = CPU.cp_d8;
+    table[0xFF] = makeRST(0xFF);
     break :blk table;
 };
 
@@ -454,14 +488,48 @@ pub const CPU = struct {
     sp: u16 = 0, // stack pointer
     pc: u16 = 0, // program counter
 
-    stopped: u1 = 0,
-    ime_flag: u1 = 0, // TODO: implement halt hardware bug later down the line
-    memory: [0x10000]u8 = undefined,
+    memory: Memory = .{},
+
+    ime_state: ImeState = .disabled,
+    halted: bool = false,
+    haltBug: bool = false,
 
     pub fn step(self: *CPU) !void {
-        const opcode = self.memory[self.pc];
-        self.pc += 1;
+        // Handle pending IME enable
+        if (self.ime_state == .enable_pending) {
+            self.ime_state = .enabled;
+        }
+
+        if (self.memory.getPendingInterrupt()) |interrupt| {
+            self.handleInterrupt(interrupt);
+            return;
+        }
+        const opcode = self.memory.read(self.pc, u8);
+
+        // Implementation of HALT hardware bug
+        if (self.haltBug) {
+            self.haltBug = false;
+        } else {
+            self.pc += 1;
+        }
+
         instruction_table[opcode](self);
+    }
+
+    fn handleInterrupt(self: *CPU, interrupt: InterruptBit) void {
+        self.ime_state = .disabled;
+        self.halted = false;
+        self.memory.acknowledgeInterrupt(interrupt);
+
+        self.pushU16(self.pc);
+
+        self.pc = switch (interrupt) {
+            .vblank => 0x0040,
+            .lcd => 0x0048,
+            .timer => 0x0050,
+            .serial => 0x0058,
+            .joypad => 0x0060,
+        };
     }
 
     // Individual instruction implementations
@@ -471,25 +539,25 @@ pub const CPU = struct {
 
     fn ld_hl_ptr_plus_a(self: *CPU) void {
         const address = self.getU16Register(.hl);
-        self.memory[address] = self.a;
+        self.memory.write(address, self.a);
         self.setU16Register(.hl, self.getU16Register(.hl) + 1);
     }
 
     fn ld_a_hl_ptr_plus(self: *CPU) void {
         const address = self.getU16Register(.hl);
-        self.a = self.memory[address];
+        self.a = self.memory.read(address, u8);
         self.setU16Register(.hl, self.getU16Register(.hl) + 1);
     }
 
     fn ld_hl_ptr_minus_a(self: *CPU) void {
         const address = self.getU16Register(.hl);
-        self.memory[address] = self.a;
+        self.memory.write(address, self.a);
         self.setU16Register(.hl, self.getU16Register(.hl) - 1);
     }
 
     fn ld_a_hl_ptr_minus(self: *CPU) void {
         const address = self.getU16Register(.hl);
-        self.a = self.memory[address];
+        self.a = self.memory.read(address, u8);
         self.setU16Register(.hl, self.getU16Register(.hl) - 1);
     }
 
@@ -538,13 +606,13 @@ pub const CPU = struct {
     }
 
     fn ld_a16_ptr_sp(self: *CPU) void {
-        const address: u16 = std.mem.readInt(u16, self.memory[self.pc..][0..2], .little);
+        const address: u16 = self.memory.read(self.pc, u16);
         self.pc += 2;
-        std.mem.writeInt(u16, self.memory[address..][0..2], self.sp, .little);
+        self.memory.write(address, self.sp);
     }
 
     fn ld_sp_d16(self: *CPU) void {
-        const d16 = std.mem.readInt(u16, self.memory[self.pc..][0..2], .little);
+        const d16 = self.memory.read(self.pc, u16);
         self.pc += 2;
         self.sp = d16;
     }
@@ -552,7 +620,7 @@ pub const CPU = struct {
     fn dec_HL(self: *CPU) void {
         const old = self.getU16Register(.hl);
         self.setU16Register(.hl, old -% 1);
-        self.updateFlags(u16, old, 1, true);
+        self.updateMathFlags(u16, old, 1, true);
     }
 
     // TODO: Need interrupts and halt states to implement
@@ -562,9 +630,10 @@ pub const CPU = struct {
 
     fn inc_hl_ptr(self: *CPU) void {
         const address = self.getU16Register(.hl);
-        const old = self.memory[address];
-        self.memory[address] +%= 1;
-        self.updateFlags(u8, old, 1, self.memory[address], false);
+        const old = self.memory.read(address, u8);
+        const new = old +% 1;
+        self.memory.write(address, new);
+        self.updateIncFlags(old, new, false);
     }
 
     fn inc_sp(self: *CPU) void {
@@ -573,9 +642,10 @@ pub const CPU = struct {
 
     fn dec_hl_ptr(self: *CPU) void {
         const address = self.getU16Register(.hl);
-        const old = self.memory[address];
-        self.memory[address] -%= 1;
-        self.updateFlags(u8, old, 1, self.memory[address], true);
+        const old = self.memory.read(address, u8);
+        const new = old -% 1;
+        self.memory.write(address, new);
+        self.updateIncFlags(old, new, true);
     }
 
     fn dec_sp(self: *CPU) void {
@@ -585,44 +655,47 @@ pub const CPU = struct {
     fn add_a_hl_ptr(self: *CPU) void {
         const address = self.getU16Register(.hl);
         const old = self.a;
-        const value = self.memory[address];
+        const value = self.memory.read(address, u8);
         self.a +%= value;
-        self.updateFlags(u8, old, value, self.a, false);
+        self.updateMathFlags(u8, old, value, self.a, false);
     }
 
     fn add_a_d8(self: *CPU) void {
         const old = self.a;
-        const value = self.memory[self.pc];
+        const value = self.memory.read(self.pc, u8);
         self.pc += 1;
         self.a +%= value;
-        self.updateFlags(u8, old, value, self.a, false);
+        self.updateMathFlags(u8, old, value, self.a, false);
     }
 
     fn sub_a_hl_ptr(self: *CPU) void {
         const address = self.getU16Register(.hl);
         const old = self.a;
-        const value = self.memory[address];
+        const value = self.memory.read(address, u8);
         self.a -%= value;
-        self.updateFlags(u8, old, value, self.a, true);
+        self.updateMathFlags(u8, old, value, self.a, true);
     }
 
     fn sub_a_d8(self: *CPU) void {
         const old = self.a;
-        const value = self.memory[self.pc];
+        const value = self.memory.read(self.pc, u8);
         self.pc += 1;
         self.a -%= value;
-        self.updateFlags(u8, old, value, self.a, true);
+        self.updateMathFlags(u8, old, value, self.a, true);
     }
 
     fn halt(self: *CPU) void {
-        _ = self;
-        // TODO: implement halt
+        self.halted = true;
+        const pending = self.memory.getPendingInterrupt();
+        if (self.ime_state == .disabled and pending != null) {
+            self.haltBug = true;
+        }
     }
 
     fn ld_hl_ptr_d8(self: *CPU) void {
-        const value = self.memory[self.pc];
+        const value = self.memory.read(self.pc, u8);
         self.pc += 1;
-        self.memory[self.getU16Register(.hl)] = value;
+        self.memory.write(self.getU16Register(.hl), value);
     }
 
     fn daa(self: *CPU) void {
@@ -670,7 +743,7 @@ pub const CPU = struct {
     }
 
     fn and_hl_ptr(self: *CPU) void {
-        self.a &= self.memory[self.getU16Register(.hl)];
+        self.a &= self.memory.read(self.getU16Register(.hl), u8);
         self.checkFlag(.z, self.a == 0);
         self.unsetFlag(.n);
         self.setFlag(.h);
@@ -678,7 +751,7 @@ pub const CPU = struct {
     }
 
     fn and_d8(self: *CPU) void {
-        const value = self.memory[self.pc];
+        const value = self.memory.read(self.pc, u8);
         self.pc += 1;
         self.a &= value;
         self.checkFlag(.z, self.a == 0);
@@ -688,7 +761,7 @@ pub const CPU = struct {
     }
 
     fn or_hl_ptr(self: *CPU) void {
-        self.a |= self.memory[self.getU16Register(.hl)];
+        self.a |= self.memory.read(self.getU16Register(.hl), u8);
         self.checkFlag(.z, self.a == 0);
         self.unsetFlag(.n);
         self.unsetFlag(.h);
@@ -696,7 +769,7 @@ pub const CPU = struct {
     }
 
     fn or_d8(self: *CPU) void {
-        const value = self.memory[self.pc];
+        const value = self.memory.read(self.pc, u8);
         self.pc += 1;
         self.a |= value;
         self.checkFlag(.z, self.a == 0);
@@ -706,7 +779,7 @@ pub const CPU = struct {
     }
 
     fn xor_hl_ptr(self: *CPU) void {
-        self.a ^= self.memory[self.getU16Register(.hl)];
+        self.a ^= self.memory.read(self.getU16Register(.hl), u8);
         self.checkFlag(.z, self.a == 0);
         self.unsetFlag(.n);
         self.unsetFlag(.h);
@@ -714,7 +787,7 @@ pub const CPU = struct {
     }
 
     fn xor_d8(self: *CPU) void {
-        const value = self.memory[self.pc];
+        const value = self.memory.read(self.pc, u8);
         self.pc += 1;
         self.a ^= value;
         self.checkFlag(.z, self.a == 0);
@@ -727,18 +800,18 @@ pub const CPU = struct {
         const old = self.a;
         const carry: u8 = if (self.readFlag(.c)) 1 else 0;
         self.a +%= self.b +% carry;
-        self.updateFlags(u8, old, self.b + carry, self.a, false);
+        self.updateMathFlags(u8, old, self.b + carry, self.a, false);
     }
 
     fn sbc_a_b(self: *CPU) void {
         const old = self.a;
         const carry: u8 = if (self.readFlag(.c)) 1 else 0;
         self.a -%= self.b +% carry;
-        self.updateFlags(u8, old, self.b + carry, self.a, true);
+        self.updateMathFlags(u8, old, self.b + carry, self.a, true);
     }
 
     fn cp_hl_ptr(self: *CPU) void {
-        const value = self.memory[self.getU16Register(.hl)];
+        const value = self.memory.read(self.getU16Register(.hl), u8);
         const result = self.a -% value;
         self.checkFlag(.z, result == 0);
         self.setFlag(.n);
@@ -747,13 +820,26 @@ pub const CPU = struct {
     }
 
     fn cp_d8(self: *CPU) void {
-        const value = self.memory[self.pc];
+        const value = self.memory.read(self.pc, u8);
         self.pc += 1;
         const result = self.a -% value;
         self.checkFlag(.z, result == 0);
         self.setFlag(.n);
         self.checkFlag(.h, (self.a & 0x0F) < (value & 0x0F));
         self.checkFlag(.c, self.a < value);
+    }
+
+    fn ei(self: *CPU) void {
+        self.ime_state = .enable_pending;
+    }
+
+    fn di(self: *CPU) void {
+        self.ime_state = .disabled;
+    }
+
+    fn reti(self: *CPU) void {
+        self.pc = self.popU16();
+        self.ime_state = .enabled; // RETI enables immediately, no delay
     }
 
     fn unknown_opcode(self: *CPU) void {
@@ -829,8 +915,17 @@ pub const CPU = struct {
         }
     }
 
-    // Helper function to update flags after arithmetic.
-    fn updateFlags(self: *CPU, comptime T: type, a: T, b: T, result: T, comptime is_subtract: bool) void {
+    fn updateIncFlags(self: *CPU, old: u8, new: u8, comptime is_dec: bool) void {
+        self.checkFlag(.z, new == 0);
+        self.checkFlag(.n, is_dec);
+        if (is_dec) {
+            self.checkFlag(.h, (old & 0x0F) == 0);
+        } else {
+            self.checkFlag(.h, (old & 0x0F) + 1 > 0x0F);
+        }
+    }
+
+    fn updateMathFlags(self: *CPU, comptime T: type, a: T, b: T, result: T, comptime is_subtract: bool) void {
         self.checkFlag(.z, result == 0);
         self.checkFlag(.n, is_subtract);
 
@@ -853,5 +948,16 @@ pub const CPU = struct {
         } else {
             unreachable;
         }
+    }
+
+    fn pushU16(self: *CPU, value: u16) void {
+        self.sp -%= 2;
+        self.memory.write(self.sp, value);
+    }
+
+    fn popU16(self: *CPU) u16 {
+        const value = self.memory.read(self.sp, u16);
+        self.sp +%= 2;
+        return value;
     }
 };
