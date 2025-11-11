@@ -18,3 +18,11 @@ pub fn main() !void {
 
     std.debug.print("CPU allocated at address: {*}\n", .{cpu});
 }
+
+fn emuLoop(cpu: *CPU) !void {
+    const running = true;
+
+    while (running) {
+        cpu.step();
+    }
+}

@@ -47,8 +47,13 @@ pub const Memory = struct {
     }
 
     pub fn loadRom(self: *Memory, rom: []u8) !void {
-        // TODO: research how this actually needs to work
+        // TODO: research how this works
         self.ram = rom;
+    }
+
+    pub fn isAnyButtonPressed(self: *Memory) bool {
+        const buttons = self.ram[0xFF00]; // Buttons are the lower 4 bits and are set to 1 if not pressed
+        return (buttons & 0x0F) != 0x0F;
     }
 
     pub fn enableInturrupt(self: *Memory, comptime interrupt: InterruptBit) void {
