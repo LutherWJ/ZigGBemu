@@ -2,7 +2,6 @@ const std = @import("std");
 const Memory = @import("memory.zig").Memory;
 const InterruptBit = @import("memory.zig").InterruptBit;
 
-const HIGH_RAM_BASE_ADDRESS = 0xFF00;
 const InstructionFn = *const fn (*CPU) void;
 const Flag = enum(u3) { z = 7, n = 6, h = 5, c = 4 };
 const Register = enum { a, f, b, c, d, e, h, l };
@@ -10,6 +9,12 @@ const U16Register = enum { bc, de, hl, af, sp, pc };
 const Conditions = enum { always, nz, z, nc, c }; // Used for conditional instructions like CALL or JP
 const ImeState = enum { disabled, enable_pending, enabled }; // interrupts are sometimes delayed one cycle
 const SourceType = enum { register, hl_ptr, immediate };
+
+const HIGH_RAM_BASE_ADDRESS = 0xFF00;
+const BIT0 = 1;
+const BIT7 = 0b10000000;
+const BIT15 = 0x8000;
+
 
 // Helper function to fetch operand value based on source type
 fn fetchSource(cpu: *CPU, comptime src_type: SourceType, comptime reg: ?Register) u8 {
@@ -315,6 +320,235 @@ fn makeRST(comptime opcode: u8) InstructionFn {
     }.f;
 }
 
+fn makeRLC(comptime regName: Register) InstructionFn {
+    return struct {
+        fn f(cpu: *CPU) void {
+            const reg = cpu.getRegister(regName);
+            const bit7 = (reg.* >> 7) & 1;
+            reg.* = (reg.* << 1) | bit7;
+
+            cpu.checkFlag(.z, reg.* == 0);
+            cpu.checkFlag(.c, bit7 != 0);
+            cpu.unsetFlag(.h);
+            cpu.unsetFlag(.n);
+        }
+    }.f;
+}
+
+
+fn makeRLC16(comptime regName: U16Register) InstructionFn {
+    return struct {
+        fn f(cpu: *CPU) void {
+            const reg = cpu.getU16Register(regName);
+            const bit15 = (reg >> 15) & 1;
+            const result = (reg << 1) | bit15;
+            cpu.setU16Register(regName, result);
+
+            cpu.checkFlag(.z, result == 0);
+            cpu.checkFlag(.c, bit15 != 0);
+            cpu.unsetFlag(.h);
+            cpu.unsetFlag(.n);
+        }
+    }.f;
+}
+
+fn makeRRC(comptime regName: Register) InstructionFn {
+    return struct {
+        fn f(cpu: *CPU) void {
+            const reg = cpu.getRegister(regName);
+            const bit0 = reg.* & 1;
+            reg.* = (reg.* >> 1) | (bit0 << 7);
+
+            cpu.checkFlag(.z, reg.* == 0);
+            cpu.checkFlag(.c, bit0 != 0);
+            cpu.unsetFlag(.h);
+            cpu.unsetFlag(.n);
+        }
+    }.f;
+}
+
+fn makeRRC16(comptime regName: U16Register) InstructionFn {
+    return struct {
+        fn f(cpu: *CPU) void {
+            const reg = cpu.getU16Register(regName);
+            const bit0 = reg & 1;
+            const result = (reg >> 1) | (bit0 << 15);
+            cpu.setU16Register(regName, result);
+
+            cpu.checkFlag(.z, result == 0);
+            cpu.checkFlag(.c, bit0 != 0);
+            cpu.unsetFlag(.h);
+            cpu.unsetFlag(.n);
+        }
+    }.f;
+}
+
+fn makeRR(comptime regName: Register) InstructionFn {
+    return struct {
+        fn f(cpu: *CPU) void {
+            const reg = cpu.getRegister(regName);
+            const bit0 = reg.* == 1;
+            const c_flag = cpu.readFlag(.c);
+            reg.* >>= 1;
+            reg.* |= @intFromBool(c_flag) << 7;
+
+            cpu.checkFlag(.c, bit0);
+            cpu.checkFlag(.z, reg == 0);
+            cpu.unsetFlag(.h);
+            cpu.unsetFlag(.n);
+        }
+    }.f;
+}
+
+fn makeRL(comptime regName: Register) InstructionFn {
+    return struct {
+        fn f(cpu: *CPU) void {
+            const reg = cpu.getRegister(regName);
+            const bit7 = (reg.*) == BIT7;
+            const c_flag = cpu.readFlag(.c);
+            reg.* <<= 1;
+            reg.* |= @intFromBool(c_flag);
+
+            cpu.checkFlag(.c, bit7);
+            cpu.checkFlag(.z, reg.* == 0);
+            cpu.unsetFlag(.h);
+            cpu.unsetFlag(.n);
+        }
+    }.f;
+}
+
+fn makeRL16(comptime regName: U16Register) InstructionFn {
+    return struct {
+        fn f(cpu: *CPU) void {
+            const reg = cpu.getU16Register(regName);
+            const bit15 = (reg >> 15) & 1;
+            const c_flag = cpu.readFlag(.c);
+            const result = (reg << 1) | @intFromBool(c_flag);
+            cpu.setU16Register(regName, result);
+
+            cpu.checkFlag(.c, bit15 != 0);
+            cpu.checkFlag(.z, result == 0);
+            cpu.unsetFlag(.h);
+            cpu.unsetFlag(.n);
+        }
+    }.f;
+}
+
+fn makeRR16(comptime regName: U16Register) InstructionFn {
+    return struct {
+        fn f(cpu: *CPU) void {
+            const reg = cpu.getU16Register(regName);
+            const bit0 = reg & 1;
+            const c_flag = cpu.readFlag(.c);
+            const result = (reg >> 1) | (@as(u16, @intFromBool(c_flag)) << 15);
+            cpu.setU16Register(regName, result);
+
+            cpu.checkFlag(.c, bit0 != 0);
+            cpu.checkFlag(.z, result == 0);
+            cpu.unsetFlag(.h);
+            cpu.unsetFlag(.n);
+        }
+    }.f;
+}
+
+fn makeSLA(comptime regName: Register) InstructionFn {
+    return struct {
+        fn f(cpu: *CPU) void {
+            const reg = cpu.getRegister(regName);
+            const bit0 = reg.* & BIT0;
+            const bit7 = (reg.* & BIT7) == BIT7;
+            reg.* <<= 1;
+            reg.* |= bit0;
+
+            cpu.checkFlag(.c, bit7);
+            cpu.checkFlag(.z, reg.* == 0);
+            cpu.unsetFlag(.h);
+            cpu.unsetFlag(.n);
+        }
+    }.f;
+}
+
+fn makeSRA(comptime regName: Register) InstructionFn {
+    return struct {
+        fn f(cpu: *CPU) void {
+            const reg = cpu.getRegister(regName);
+            const bit0 = (reg.* & BIT0) == BIT0;
+            const bit7 = reg.* & BIT7;
+            reg.* >>= 1;
+            reg.* |= bit7;
+
+            cpu.checkFlag(.c, bit0);
+            cpu.checkFlag(.z, reg.* == 0);
+            cpu.unsetFlag(.h);
+            cpu.unsetFlag(.n);
+        }
+    }.f;
+}
+
+fn makeSRL(comptime regName: Register) InstructionFn {
+    return struct {
+        fn f(cpu: *CPU) void {
+            const reg = cpu.getRegister(regName);
+            const bit0 = (reg.* & BIT0) == BIT0;
+            reg.* >>= 1;
+
+            cpu.checkFlag(.c, bit0);
+            cpu.checkFlag(.z, reg.* == 0);
+            cpu.unsetFlag(.h);
+            cpu.unsetFlag(.n);
+        }
+    }.f;
+}
+
+fn makeSRL16(comptime regName: U16Register) InstructionFn {
+    return struct {
+        fn f(cpu: *CPU) void {
+            const reg = cpu.getU16Register(regName);
+            const bit0 = reg & 1;
+            const result = reg >> 1;
+            cpu.setU16Register(regName, result);
+
+            cpu.checkFlag(.c, bit0 != 0);
+            cpu.checkFlag(.z, result == 0);
+            cpu.unsetFlag(.h);
+            cpu.unsetFlag(.n);
+        }
+    }.f;
+}
+
+fn makeSLA16(comptime regName: U16Register) InstructionFn {
+    return struct {
+        fn f(cpu: *CPU) void {
+            const reg = cpu.getU16Register(regName);
+            const bit15 = (reg & BIT15) == BIT15;
+            const result = reg << 1;
+            cpu.setU16Register(regName, result);
+
+            cpu.checkFlag(.c, bit15);
+            cpu.checkFlag(.z, result == 0);
+            cpu.unsetFlag(.h);
+            cpu.unsetFlag(.n);
+        }
+    }.f;
+}
+
+fn makeSRA16(comptime regName: U16Register) InstructionFn {
+    return struct {
+        fn f(cpu: *CPU) void {
+            const reg = cpu.getU16Register(regName);
+            const bit0 = (reg & BIT0) == BIT0;
+            const bit15 = reg & BIT15;
+            const result = (reg >> 1) | bit15;
+            cpu.setU16Register(regName, result);
+
+            cpu.checkFlag(.c, bit0);
+            cpu.checkFlag(.z, result == 0);
+            cpu.unsetFlag(.h);
+            cpu.unsetFlag(.n);
+        }
+    }.f;
+}
+
 // Instruction table matching opcodes to their corresponding functions
 const instruction_table = blk: {
     var table = [_]InstructionFn{CPU.unknown_opcode} ** 256;
@@ -521,6 +755,7 @@ const instruction_table = blk: {
     table[0xC8] = makeRet(.z);
     table[0xC9] = makeRet(.always);
     table[0xCA] = makeJumpAbsolute(.z);
+    table[0xCB] = CPU.cb_prefix();
     table[0xCC] = makeCall(.z);
     table[0xCD] = makeCall(.always);
     table[0xCE] = makeAdc(.immediate, null);
@@ -562,6 +797,68 @@ const instruction_table = blk: {
     table[0xFB] = CPU.ei;
     table[0xFE] = makeCp(.immediate, null);
     table[0xFF] = makeRST(0xFF);
+    break :blk table;
+};
+
+const cb_instruction_table = blk: {
+    var table = [_]InstructionFn{CPU.unknown_opcode} ** 256;
+    table[0x00] = makeRLC(.b);
+    table[0x01] = makeRLC(.c);
+    table[0x02] = makeRLC(.d);
+    table[0x03] = makeRLC(.e);
+    table[0x04] = makeRLC(.h);
+    table[0x05] = makeRLC(.l);
+    table[0x06] = makeRLC16(.hl);
+    table[0x07] = makeRLC(.a);
+    table[0x08] = makeRRC(.b);
+    table[0x09] = makeRRC(.c);
+    table[0x0A] = makeRRC(.d);
+    table[0x0B] = makeRRC(.e);
+    table[0x0C] = makeRRC(.h);
+    table[0x0D] = makeRRC(.l);
+    table[0x0E] = makeRRC16(.hl);
+    table[0x0F] = makeRRC(.a);
+    table[0x10] = makeRL(.b);
+    table[0x11] = makeRL(.c);
+    table[0x12] = makeRL(.d);
+    table[0x13] = makeRL(.e);
+    table[0x14] = makeRL(.h);
+    table[0x15] = makeRL(.l);
+    table[0x16] = makeRL16(.hl);
+    table[0x17] = makeRL(.a);
+    table[0x18] = makeRR(.b);
+    table[0x19] = makeRR(.c);
+    table[0x1A] = makeRR(.d);
+    table[0x1B] = makeRR(.e);
+    table[0x1C] = makeRR(.h);
+    table[0x1D] = makeRR(.l);
+    table[0x1E] = makeRR16(.hl);
+    table[0x1F] = makeRR(.a);
+    table[0x20] = makeSLA(.b);
+    table[0x21] = makeSLA(.c);
+    table[0x22] = makeSLA(.d);
+    table[0x23] = makeSLA(.e);
+    table[0x24] = makeSLA(.h);
+    table[0x25] = makeSLA(.l);
+    table[0x26] = makeSLA16(.hl);
+    table[0x27] = makeSLA(.a);
+    table[0x28] = makeSRA(.b);
+    table[0x29] = makeSRA(.c);
+    table[0x2A] = makeSRA(.d);
+    table[0x2B] = makeSRA(.e);
+    table[0x2C] = makeSRA(.h);
+    table[0x2D] = makeSRA(.l);
+    table[0x2E] = makeSRA16(.hl);
+    table[0x2F] = makeSRA(.a);
+
+    table[0x38] = makeSRL(.b);
+    table[0x39] = makeSRL(.c);
+    table[0x3A] = makeSRL(.d);
+    table[0x3B] = makeSRL(.e);
+    table[0x3C] = makeSRL(.h);
+    table[0x3D] = makeSRL(.l);
+    table[0x3E] = makeSRL16(.hl);
+    table[0x3F] = makeSRL(.a);
     break :blk table;
 };
 
@@ -668,6 +965,12 @@ pub const CPU = struct {
     // Individual instruction implementations
     fn nop(self: *CPU) void {
         _ = self;
+    }
+
+    fn cb_prefix(self: *CPU) void {
+        const opcode = self.memory.read(self.pc, u8);
+        self.pc += 1;
+        cb_instruction_table[opcode](self);
     }
 
     fn ld_hl_ptr_plus_a(self: *CPU) void {
@@ -782,18 +1085,26 @@ pub const CPU = struct {
 
     fn rla(self: *CPU) void {
         const carry_flag: u8 = (self.f >> 4) & 1;
-        const bit7: u8 = self.a & 0b10000000;
+        const bit7: u8 = self.a & BIT7;
         self.a <<= 1;
         self.a |= carry_flag;
-        self.f = bit7 >> 3;
+
+        self.unsetFlag(.z);
+        self.unsetFlag(.n);
+        self.unsetFlag(.h);
+        self.checkFlag(.c, bit7 != 0);
     }
 
     fn rra(self: *CPU) void {
-        const carry_flag: u8 = (self.f << 3) & 0b10000000;
+        const carry_flag: u8 = (self.f << 3) & BIT7;
         const bit0: u8 = self.a & 1;
         self.a >>= 1;
         self.a |= carry_flag;
-        self.f = bit0 << 4;
+
+        self.unsetFlag(.z);
+        self.unsetFlag(.n);
+        self.unsetFlag(.h);
+        self.checkFlag(.c, bit0 != 0);
     }
 
     fn rrca(self: *CPU) void {
@@ -1004,8 +1315,8 @@ pub const CPU = struct {
     fn checkConditional(self: *CPU, comptime cond: Conditions) bool {
         return switch (cond) {
             .always => true,
-            .nz => (self.f & 0b10000000) != 0b10000000,
-            .z => (self.f & 0b10000000) == 0b10000000,
+            .nz => (self.f & BIT7) != BIT7,
+            .z => (self.f & BIT7) == BIT7,
             .nc => (self.f & 0b00010000) != 0b00010000,
             .c => (self.f & 0b00010000) == 0b00010000,
         };

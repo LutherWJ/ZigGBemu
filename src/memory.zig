@@ -24,6 +24,10 @@ const IF_ADDRESS: u16 = 0xFF0F;
 
 pub const Memory = struct {
     ram: [0x10000]u8 = undefined,
+    rom_data: []u8,
+    external_ram: []u8,
+    work_ram: [0x2000]u8,
+    video_ram: [0x2000]u8,
 
     pub fn read(self: *Memory, address: u16, comptime T: type) T {
         if (T == u8) {
