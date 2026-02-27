@@ -1,6 +1,6 @@
 const std = @import("std");
-const Memory = @import("memory.zig").Memory;
-const InterruptBit = @import("memory.zig").InterruptBit;
+const MMU = @import("mmu.zig").MMU;
+const InterruptBit = @import("mmu.zig").InterruptBit;
 
 const InstructionFn = *const fn (*CPU) void;
 const Flag = enum(u3) { z = 7, n = 6, h = 5, c = 4 };
@@ -14,7 +14,6 @@ const HIGH_RAM_BASE_ADDRESS = 0xFF00;
 const BIT0 = 1;
 const BIT7 = 0b10000000;
 const BIT15 = 0x8000;
-
 
 // Helper function to fetch operand value based on source type
 fn fetchSource(cpu: *CPU, comptime src_type: SourceType, comptime reg: ?Register) u8 {
@@ -335,7 +334,6 @@ fn makeRLC(comptime regName: Register) InstructionFn {
     }.f;
 }
 
-
 fn makeRLC16(comptime regName: U16Register) InstructionFn {
     return struct {
         fn f(cpu: *CPU) void {
@@ -545,6 +543,55 @@ fn makeSRA16(comptime regName: U16Register) InstructionFn {
             cpu.checkFlag(.z, result == 0);
             cpu.unsetFlag(.h);
             cpu.unsetFlag(.n);
+        }
+    }.f;
+}
+
+fn makeBIT(comptime bit_num: u3, comptime src_type: SourceType, comptime reg: ?Register) InstructionFn {
+    return struct {
+        fn f(cpu: *CPU) void {
+            const dst = fetchSource(cpu, src_type, reg);
+            cpu.checkFlag(.z, (dst & (@as(u8, 1) << bit_num)) == 0);
+            cpu.unsetFlag(.n);
+            cpu.setFlag(.h);
+        }
+    }.f;
+}
+
+fn makeRES(comptime bit_num: u3, comptime src_type: SourceType, comptime reg: ?Register) InstructionFn {
+    return struct {
+        fn f(cpu: *CPU) void {
+            switch (src_type) {
+                .register => {
+                    cpu.getRegister(reg.?).* &= ~(@as(u8, 1) << bit_num);
+                },
+                .hl_ptr => {
+                    const address = cpu.getU16Register(.hl);
+                    var val = cpu.memory.read(address, u8);
+                    val &= ~(@as(u8, 1) << bit_num);
+                    cpu.memory.write(address, val);
+                },
+                .immediate => @compileError("Immediate SourceType is not supported on RES instructions."),
+            }
+        }
+    }.f;
+}
+
+fn makeSET(comptime bit_num: u3, comptime src_type: SourceType, comptime reg: ?Register) InstructionFn {
+    return struct {
+        fn f(cpu: *CPU) void {
+            switch (src_type) {
+                .register => {
+                    cpu.getRegister(reg.?).* |= (@as(u8, 1) << bit_num);
+                },
+                .hl_ptr => {
+                    const address = cpu.getU16Register(.hl);
+                    var val = cpu.memory.read(address, u8);
+                    val |= (@as(u8, 1) << bit_num);
+                    cpu.memory.write(address, val);
+                },
+                .immediate => @compileError("Immediate SourceType is not supported on SET instructions."),
+            }
         }
     }.f;
 }
@@ -859,6 +906,202 @@ const cb_instruction_table = blk: {
     table[0x3D] = makeSRL(.l);
     table[0x3E] = makeSRL16(.hl);
     table[0x3F] = makeSRL(.a);
+
+    table[0x40] = makeBIT(0, .register, .b);
+    table[0x41] = makeBIT(0, .register, .c);
+    table[0x42] = makeBIT(0, .register, .d);
+    table[0x43] = makeBIT(0, .register, .e);
+    table[0x44] = makeBIT(0, .register, .h);
+    table[0x45] = makeBIT(0, .register, .l);
+    table[0x46] = makeBIT(0, .hl_ptr, null);
+    table[0x47] = makeBIT(0, .register, .a);
+    table[0x48] = makeBIT(1, .register, .b);
+    table[0x49] = makeBIT(1, .register, .c);
+    table[0x4A] = makeBIT(1, .register, .d);
+    table[0x4B] = makeBIT(1, .register, .e);
+    table[0x4C] = makeBIT(1, .register, .h);
+    table[0x4D] = makeBIT(1, .register, .l);
+    table[0x4E] = makeBIT(1, .hl_ptr, null);
+    table[0x4F] = makeBIT(1, .register, .a);
+    table[0x50] = makeBIT(2, .register, .b);
+    table[0x51] = makeBIT(2, .register, .c);
+    table[0x52] = makeBIT(2, .register, .d);
+    table[0x53] = makeBIT(2, .register, .e);
+    table[0x54] = makeBIT(2, .register, .h);
+    table[0x55] = makeBIT(2, .register, .l);
+    table[0x56] = makeBIT(2, .hl_ptr, null);
+    table[0x57] = makeBIT(2, .register, .a);
+    table[0x58] = makeBIT(3, .register, .b);
+    table[0x59] = makeBIT(3, .register, .c);
+    table[0x5A] = makeBIT(3, .register, .d);
+    table[0x5B] = makeBIT(3, .register, .e);
+    table[0x5C] = makeBIT(3, .register, .h);
+    table[0x5D] = makeBIT(3, .register, .l);
+    table[0x5E] = makeBIT(3, .hl_ptr, null);
+    table[0x5F] = makeBIT(3, .register, .a);
+    table[0x60] = makeBIT(4, .register, .b);
+    table[0x61] = makeBIT(4, .register, .c);
+    table[0x62] = makeBIT(4, .register, .d);
+    table[0x63] = makeBIT(4, .register, .e);
+    table[0x64] = makeBIT(4, .register, .h);
+    table[0x65] = makeBIT(4, .register, .l);
+    table[0x66] = makeBIT(4, .hl_ptr, null);
+    table[0x67] = makeBIT(4, .register, .a);
+    table[0x68] = makeBIT(5, .register, .b);
+    table[0x69] = makeBIT(5, .register, .c);
+    table[0x6A] = makeBIT(5, .register, .d);
+    table[0x6B] = makeBIT(5, .register, .e);
+    table[0x6C] = makeBIT(5, .register, .h);
+    table[0x6D] = makeBIT(5, .register, .l);
+    table[0x6E] = makeBIT(5, .hl_ptr, null);
+    table[0x6F] = makeBIT(5, .register, .a);
+    table[0x70] = makeBIT(6, .register, .b);
+    table[0x71] = makeBIT(6, .register, .c);
+    table[0x72] = makeBIT(6, .register, .d);
+    table[0x73] = makeBIT(6, .register, .e);
+    table[0x74] = makeBIT(6, .register, .h);
+    table[0x75] = makeBIT(6, .register, .l);
+    table[0x76] = makeBIT(6, .hl_ptr, null);
+    table[0x77] = makeBIT(6, .register, .a);
+    table[0x78] = makeBIT(7, .register, .b);
+    table[0x79] = makeBIT(7, .register, .c);
+    table[0x7A] = makeBIT(7, .register, .d);
+    table[0x7B] = makeBIT(7, .register, .e);
+    table[0x7C] = makeBIT(7, .register, .h);
+    table[0x7D] = makeBIT(7, .register, .l);
+    table[0x7E] = makeBIT(7, .hl_ptr, null);
+    table[0x7F] = makeBIT(7, .register, .a);
+
+    table[0x80] = makeRES(0, .register, .b);
+    table[0x81] = makeRES(0, .register, .c);
+    table[0x82] = makeRES(0, .register, .d);
+    table[0x83] = makeRES(0, .register, .e);
+    table[0x84] = makeRES(0, .register, .h);
+    table[0x85] = makeRES(0, .register, .l);
+    table[0x86] = makeRES(0, .hl_ptr, null);
+    table[0x87] = makeRES(0, .register, .a);
+    table[0x88] = makeRES(1, .register, .b);
+    table[0x89] = makeRES(1, .register, .c);
+    table[0x8A] = makeRES(1, .register, .d);
+    table[0x8B] = makeRES(1, .register, .e);
+    table[0x8C] = makeRES(1, .register, .h);
+    table[0x8D] = makeRES(1, .register, .l);
+    table[0x8E] = makeRES(1, .hl_ptr, null);
+    table[0x8F] = makeRES(1, .register, .a);
+    table[0x90] = makeRES(2, .register, .b);
+    table[0x91] = makeRES(2, .register, .c);
+    table[0x92] = makeRES(2, .register, .d);
+    table[0x93] = makeRES(2, .register, .e);
+    table[0x94] = makeRES(2, .register, .h);
+    table[0x95] = makeRES(2, .register, .l);
+    table[0x96] = makeRES(2, .hl_ptr, null);
+    table[0x97] = makeRES(2, .register, .a);
+    table[0x98] = makeRES(3, .register, .b);
+    table[0x99] = makeRES(3, .register, .c);
+    table[0x9A] = makeRES(3, .register, .d);
+    table[0x9B] = makeRES(3, .register, .e);
+    table[0x9C] = makeRES(3, .register, .h);
+    table[0x9D] = makeRES(3, .register, .l);
+    table[0x9E] = makeRES(3, .hl_ptr, null);
+    table[0x9F] = makeRES(3, .register, .a);
+    table[0xA0] = makeRES(4, .register, .b);
+    table[0xA1] = makeRES(4, .register, .c);
+    table[0xA2] = makeRES(4, .register, .d);
+    table[0xA3] = makeRES(4, .register, .e);
+    table[0xA4] = makeRES(4, .register, .h);
+    table[0xA5] = makeRES(4, .register, .l);
+    table[0xA6] = makeRES(4, .hl_ptr, null);
+    table[0xA7] = makeRES(4, .register, .a);
+    table[0xA8] = makeRES(5, .register, .b);
+    table[0xA9] = makeRES(5, .register, .c);
+    table[0xAA] = makeRES(5, .register, .d);
+    table[0xAB] = makeRES(5, .register, .e);
+    table[0xAC] = makeRES(5, .register, .h);
+    table[0xAD] = makeRES(5, .register, .l);
+    table[0xAE] = makeRES(5, .hl_ptr, null);
+    table[0xAF] = makeRES(5, .register, .a);
+    table[0xB0] = makeRES(6, .register, .b);
+    table[0xB1] = makeRES(6, .register, .c);
+    table[0xB2] = makeRES(6, .register, .d);
+    table[0xB3] = makeRES(6, .register, .e);
+    table[0xB4] = makeRES(6, .register, .h);
+    table[0xB5] = makeRES(6, .register, .l);
+    table[0xB6] = makeRES(6, .hl_ptr, null);
+    table[0xB7] = makeRES(6, .register, .a);
+    table[0xB8] = makeRES(7, .register, .b);
+    table[0xB9] = makeRES(7, .register, .c);
+    table[0xBA] = makeRES(7, .register, .d);
+    table[0xBB] = makeRES(7, .register, .e);
+    table[0xBC] = makeRES(7, .register, .h);
+    table[0xBD] = makeRES(7, .register, .l);
+    table[0xBE] = makeRES(7, .hl_ptr, null);
+    table[0xBF] = makeRES(7, .register, .a);
+
+    table[0xC0] = makeSET(0, .register, .b);
+    table[0xC1] = makeSET(0, .register, .c);
+    table[0xC2] = makeSET(0, .register, .d);
+    table[0xC3] = makeSET(0, .register, .e);
+    table[0xC4] = makeSET(0, .register, .h);
+    table[0xC5] = makeSET(0, .register, .l);
+    table[0xC6] = makeSET(0, .hl_ptr, null);
+    table[0xC7] = makeSET(0, .register, .a);
+    table[0xC8] = makeSET(1, .register, .b);
+    table[0xC9] = makeSET(1, .register, .c);
+    table[0xCA] = makeSET(1, .register, .d);
+    table[0xCB] = makeSET(1, .register, .e);
+    table[0xCC] = makeSET(1, .register, .h);
+    table[0xCD] = makeSET(1, .register, .l);
+    table[0xCE] = makeSET(1, .hl_ptr, null);
+    table[0xCF] = makeSET(1, .register, .a);
+    table[0xD0] = makeSET(2, .register, .b);
+    table[0xD1] = makeSET(2, .register, .c);
+    table[0xD2] = makeSET(2, .register, .d);
+    table[0xD3] = makeSET(2, .register, .e);
+    table[0xD4] = makeSET(2, .register, .h);
+    table[0xD5] = makeSET(2, .register, .l);
+    table[0xD6] = makeSET(2, .hl_ptr, null);
+    table[0xD7] = makeSET(2, .register, .a);
+    table[0xD8] = makeSET(3, .register, .b);
+    table[0xD9] = makeSET(3, .register, .c);
+    table[0xDA] = makeSET(3, .register, .d);
+    table[0xDB] = makeSET(3, .register, .e);
+    table[0xDC] = makeSET(3, .register, .h);
+    table[0xDD] = makeSET(3, .register, .l);
+    table[0xDE] = makeSET(3, .hl_ptr, null);
+    table[0xDF] = makeSET(3, .register, .a);
+    table[0xE0] = makeSET(4, .register, .b);
+    table[0xE1] = makeSET(4, .register, .c);
+    table[0xE2] = makeSET(4, .register, .d);
+    table[0xE3] = makeSET(4, .register, .e);
+    table[0xE4] = makeSET(4, .register, .h);
+    table[0xE5] = makeSET(4, .register, .l);
+    table[0xE6] = makeSET(4, .hl_ptr, null);
+    table[0xE7] = makeSET(4, .register, .a);
+    table[0xE8] = makeSET(5, .register, .b);
+    table[0xE9] = makeSET(5, .register, .c);
+    table[0xEA] = makeSET(5, .register, .d);
+    table[0xEB] = makeSET(5, .register, .e);
+    table[0xEC] = makeSET(5, .register, .h);
+    table[0xED] = makeSET(5, .register, .l);
+    table[0xEE] = makeSET(5, .hl_ptr, null);
+    table[0xEF] = makeSET(5, .register, .a);
+    table[0xF0] = makeSET(6, .register, .b);
+    table[0xF1] = makeSET(6, .register, .c);
+    table[0xF2] = makeSET(6, .register, .d);
+    table[0xF3] = makeSET(6, .register, .e);
+    table[0xF4] = makeSET(6, .register, .h);
+    table[0xF5] = makeSET(6, .register, .l);
+    table[0xF6] = makeSET(6, .hl_ptr, null);
+    table[0xF7] = makeSET(6, .register, .a);
+    table[0xF8] = makeSET(7, .register, .b);
+    table[0xF9] = makeSET(7, .register, .c);
+    table[0xFA] = makeSET(7, .register, .d);
+    table[0xFB] = makeSET(7, .register, .e);
+    table[0xFC] = makeSET(7, .register, .h);
+    table[0xFD] = makeSET(7, .register, .l);
+    table[0xFE] = makeSET(7, .hl_ptr, null);
+    table[0xFF] = makeSET(7, .register, .a);
+
     break :blk table;
 };
 
@@ -875,7 +1118,7 @@ pub const CPU = struct {
     sp: u16 = 0, // stack pointer
     pc: u16 = 0, // program counter
 
-    memory: Memory = .{},
+    memory: MMU = .{},
 
     ime_state: ImeState = .disabled,
     halted: bool = false,
