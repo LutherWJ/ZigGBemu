@@ -10,7 +10,7 @@ const Conditions = enum { always, nz, z, nc, c }; // Used for conditional instru
 const ImeState = enum { disabled, enable_pending, enabled }; // interrupts are sometimes delayed one cycle
 const SourceType = enum { register, hl_ptr, immediate };
 
-const HIGH_RAM_BASE_ADDRESS = 0xFF00;
+const HIGH_RAM_BASE_ADDRESS: u16 = 0xFF00;
 const BIT0 = 1;
 const BIT7 = 0b10000000;
 const BIT15 = 0x8000;
@@ -385,13 +385,13 @@ fn makeRR(comptime regName: Register) InstructionFn {
     return struct {
         fn f(cpu: *CPU) void {
             const reg = cpu.getRegister(regName);
-            const bit0 = reg.* == 1;
+            const bit0 = reg.* & 1;
             const c_flag = cpu.readFlag(.c);
             reg.* >>= 1;
-            reg.* |= @intFromBool(c_flag) << 7;
+            reg.* |= @as(u8, @intFromBool(c_flag)) << 7;
 
-            cpu.checkFlag(.c, bit0);
-            cpu.checkFlag(.z, reg == 0);
+            cpu.checkFlag(.c, bit0 != 0);
+            cpu.checkFlag(.z, reg.* == 0);
             cpu.unsetFlag(.h);
             cpu.unsetFlag(.n);
         }
@@ -581,21 +581,45 @@ fn makeSET(comptime bit_num: u3, comptime src_type: SourceType, comptime reg: ?R
     return struct {
         fn f(cpu: *CPU) void {
             switch (src_type) {
-                .register => {
-                    cpu.getRegister(reg.?).* |= (@as(u8, 1) << bit_num);
-                },
                 .hl_ptr => {
                     const address = cpu.getU16Register(.hl);
                     var val = cpu.memory.read(address, u8);
                     val |= (@as(u8, 1) << bit_num);
                     cpu.memory.write(address, val);
                 },
+                .register => cpu.getRegister(reg.?).* |= (@as(u8, 1) << bit_num),
                 .immediate => @compileError("Immediate SourceType is not supported on SET instructions."),
             }
         }
     }.f;
 }
 
+fn makeSWAP(comptime src: SourceType, reg_name: ?Register) InstructionFn {
+    return struct {
+        fn f(cpu: *CPU) void {
+            switch (src) {
+                .register => {
+                    const reg = cpu.getRegister(reg_name.?);
+                    const high = reg.* >> 4;
+                    reg.* = (reg.* << 4) | high;
+                    cpu.checkFlag(.z, reg.* == 0);
+                },
+                .hl_ptr => {
+                    const address = cpu.getU16Register(.hl);
+                    const val = cpu.memory.read(address, u8);
+                    const high = val >> 4;
+                    cpu.memory.write(address, (val << 4) | high);
+                    cpu.checkFlag(.z, val == 0);
+                },
+                .immediate => @compileError("Immediate SourceType is not supported on SWAP instructions."),
+            }
+
+            cpu.unsetFlag(.c);
+            cpu.unsetFlag(.n);
+            cpu.unsetFlag(.h);
+        }
+    }.f;
+}
 // Instruction table matching opcodes to their corresponding functions
 const instruction_table = blk: {
     var table = [_]InstructionFn{CPU.unknown_opcode} ** 256;
@@ -802,7 +826,7 @@ const instruction_table = blk: {
     table[0xC8] = makeRet(.z);
     table[0xC9] = makeRet(.always);
     table[0xCA] = makeJumpAbsolute(.z);
-    table[0xCB] = CPU.cb_prefix();
+    table[0xCB] = CPU.cb_prefix;
     table[0xCC] = makeCall(.z);
     table[0xCD] = makeCall(.always);
     table[0xCE] = makeAdc(.immediate, null);
@@ -897,6 +921,14 @@ const cb_instruction_table = blk: {
     table[0x2D] = makeSRA(.l);
     table[0x2E] = makeSRA16(.hl);
     table[0x2F] = makeSRA(.a);
+    table[0x30] = makeSWAP(.register, .b);
+    table[0x31] = makeSWAP(.register, .c);
+    table[0x32] = makeSWAP(.register, .d);
+    table[0x33] = makeSWAP(.register, .e);
+    table[0x34] = makeSWAP(.register, .h);
+    table[0x35] = makeSWAP(.register, .l);
+    table[0x36] = makeSWAP(.hl_ptr, null);
+    table[0x37] = makeSWAP(.register, .a);
 
     table[0x38] = makeSRL(.b);
     table[0x39] = makeSRL(.c);
@@ -906,7 +938,6 @@ const cb_instruction_table = blk: {
     table[0x3D] = makeSRL(.l);
     table[0x3E] = makeSRL16(.hl);
     table[0x3F] = makeSRL(.a);
-
     table[0x40] = makeBIT(0, .register, .b);
     table[0x41] = makeBIT(0, .register, .c);
     table[0x42] = makeBIT(0, .register, .d);
@@ -971,7 +1002,6 @@ const cb_instruction_table = blk: {
     table[0x7D] = makeBIT(7, .register, .l);
     table[0x7E] = makeBIT(7, .hl_ptr, null);
     table[0x7F] = makeBIT(7, .register, .a);
-
     table[0x80] = makeRES(0, .register, .b);
     table[0x81] = makeRES(0, .register, .c);
     table[0x82] = makeRES(0, .register, .d);
@@ -1036,7 +1066,6 @@ const cb_instruction_table = blk: {
     table[0xBD] = makeRES(7, .register, .l);
     table[0xBE] = makeRES(7, .hl_ptr, null);
     table[0xBF] = makeRES(7, .register, .a);
-
     table[0xC0] = makeSET(0, .register, .b);
     table[0xC1] = makeSET(0, .register, .c);
     table[0xC2] = makeSET(0, .register, .d);
@@ -1101,7 +1130,6 @@ const cb_instruction_table = blk: {
     table[0xFD] = makeSET(7, .register, .l);
     table[0xFE] = makeSET(7, .hl_ptr, null);
     table[0xFF] = makeSET(7, .register, .a);
-
     break :blk table;
 };
 
@@ -1135,6 +1163,7 @@ pub const CPU = struct {
             return;
         }
         const opcode = self.memory.read(self.pc, u8);
+        std.debug.print("\nExecuting PC: 0x{X:0>4}, Opcode: 0x{X:0>2}\n", .{ self.pc, opcode });
 
         // Implementation of HALT hardware bug
         if (self.haltBug) {
@@ -1154,7 +1183,8 @@ pub const CPU = struct {
         self.e = 0xD8;
         self.h = 0x01;
         self.l = 0x4D;
-        self.sp = 0x0100;
+        self.sp = 0xFFFE;
+        self.pc = 0x0100;
 
         self.memory.write(0xFF05, 0x00);
         self.memory.write(0xFF06, 0x00);
@@ -1248,7 +1278,7 @@ pub const CPU = struct {
     }
 
     fn ld_c_a(self: *CPU) void {
-        const address = HIGH_RAM_BASE_ADDRESS + self.c;
+        const address: u16 = HIGH_RAM_BASE_ADDRESS + self.c;
         self.memory.write(address, self.a);
     }
 
@@ -1260,7 +1290,7 @@ pub const CPU = struct {
     }
 
     fn ldh_a_c(self: *CPU) void {
-        const address = HIGH_RAM_BASE_ADDRESS + self.c;
+        const address: u16 = HIGH_RAM_BASE_ADDRESS + self.c;
         self.a = self.memory.read(address, u8);
     }
 

@@ -11,7 +11,6 @@ pub const InterruptBit = enum(u3) {
 };
 
 // Memory map constants
-// Memory map constants
 const ROM0_START: u16 = 0x0000;
 const ROM0_END: u16 = 0x3FFF;
 const ROM0_SIZE = ROM0_END - ROM0_START + 1;
@@ -59,8 +58,6 @@ const IE_ADDRESS: u16 = 0xFFFF;
 const IE_REG = IE_ADDRESS;
 const IF_ADDRESS: u16 = 0xFF0F;
 
-// Memory sizes
-
 pub const MMU = struct {
     ie_reg: u8 = 0,
     if_reg: u8 = 0,
@@ -71,37 +68,36 @@ pub const MMU = struct {
     oam: [OAM_SIZE]u8 = [_]u8{0} ** OAM_SIZE,
 
     pub fn read(self: *MMU, address: u16, comptime T: type) T {
-        switch (T) {
+        return switch (T) {
             u8 => self.readU8(address),
             u16 => self.readU16(address),
             else => @compileError("MMU.read only supports u8 and u16 types"),
-        }
+        };
     }
 
     pub fn write(self: *MMU, address: u16, value: anytype) void {
         const T = @TypeOf(value);
-        switch (T) {
-            u8 => {
-                switch (address) {
-                    VRAM_START...VRAM_END => self.vram[address - VRAM_START] = value,
-                    WRAM0_START...WRAM0_END => self.wram0[address - WRAM0_START] = value,
-                    WRAMX_START...WRAMX_END => self.wram1[address - WRAMX_START] = value,
-                    ECHO_START...ECHO_END => self.write(address - 0x2000, value),
-                    OAM_START...OAM_END => self.oam[address - OAM_START] = value,
-                    HRAM_START...HRAM_END => self.hram[address - HRAM_START] = value,
-                    IO_START...IO_END => switch (address) {
-                        IF_ADDRESS => self.if_reg = value,
-                        else => {}, // TODO: handle other I/O
-                    },
-                    IE_REG => self.ie_reg = value,
-                    else => {}, // TODO: handle other regions
-                }
-            },
-            u16 => {
-                self.write(address, @as(u8, @truncate(value)));
-                self.write(address + 1, @as(u8, @truncate(value >> 8)));
-            },
-            else => @compileError("Memory.write only supports u8 and u16 types"),
+        if (T == u8 or T == comptime_int) {
+            const val: u8 = @truncate(value);
+            switch (address) {
+                VRAM_START...VRAM_END => self.vram[address - VRAM_START] = val,
+                WRAM0_START...WRAM0_END => self.wram0[address - WRAM0_START] = val,
+                WRAMX_START...WRAMX_END => self.wram1[address - WRAMX_START] = val,
+                ECHO_START...ECHO_END => self.write(address - 0x2000, val),
+                OAM_START...OAM_END => self.oam[address - OAM_START] = val,
+                HRAM_START...HRAM_END => self.hram[address - HRAM_START] = val,
+                IO_START...IO_END => switch (address) {
+                    IF_ADDRESS => self.if_reg = val,
+                    else => {}, // TODO: handle other I/O
+                },
+                IE_REG => self.ie_reg = val,
+                else => {}, // TODO: handle other regions
+            }
+        } else if (T == u16) {
+            self.write(address, @as(u8, @truncate(value)));
+            self.write(address + 1, @as(u8, @truncate(value >> 8)));
+        } else {
+            @compileError("Memory.write only supports u8 and u16 types");
         }
     }
 
@@ -163,7 +159,7 @@ pub const MMU = struct {
             EXTRAM_START...EXTRAM_END => 0,
             WRAM0_START...WRAM0_END => self.wram0[address - WRAM0_START],
             WRAMX_START...WRAMX_END => self.wram1[address - WRAMX_START],
-            ECHO_START...ECHO_END => self.readU8(address - 0x2000), // TODO: fix stack overflow
+            ECHO_START...ECHO_END => self.readU8(address - 0x2000),
             OAM_START...OAM_END => self.oam[address - OAM_START],
             UNUSABLE_START...UNUSABLE_END => 0xFF,
             IO_START...IO_END => switch (address) {
