@@ -623,513 +623,196 @@ fn makeSWAP(comptime src: SourceType, reg_name: ?Register) InstructionFn {
 // Instruction table matching opcodes to their corresponding functions
 const instruction_table = blk: {
     var table = [_]InstructionFn{CPU.unknown_opcode} ** 256;
+
+    const getReg = struct {
+        fn f(comptime i: usize) ?Register {
+            return switch (i) {
+                0 => .b,
+                1 => .c,
+                2 => .d,
+                3 => .e,
+                4 => .h,
+                5 => .l,
+                6 => null,
+                7 => .a,
+                else => unreachable,
+            };
+        }
+    }.f;
+
     table[0x00] = CPU.nop;
-    table[0x01] = makeLdU16RegD16(.bc);
-    table[0x02] = makeLdU16PtrReg(.bc, .a);
-    table[0x03] = makeIncU16Reg(.bc);
-    table[0x04] = makeIncReg(.b);
-    table[0x05] = makeDecReg(.b);
-    table[0x06] = makeLdRegD8(.b);
     table[0x07] = CPU.rlca;
     table[0x08] = CPU.ld_a16_ptr_sp;
-    table[0x09] = makeAddHl(.bc);
-    table[0x0A] = makeLdRegU16Ptr(.a, .bc);
-    table[0x0B] = makeDecU16Reg(.bc);
-    table[0x0C] = makeIncReg(.c);
-    table[0x0D] = makeDecReg(.c);
-    table[0x0E] = makeLdRegD8(.c);
     table[0x0F] = CPU.rrca;
     table[0x10] = CPU.stop;
-    table[0x11] = makeLdU16RegD16(.de);
-    table[0x12] = makeLdU16PtrReg(.de, .a);
-    table[0x13] = makeIncU16Reg(.de);
-    table[0x14] = makeIncReg(.d);
-    table[0x15] = makeDecReg(.d);
-    table[0x16] = makeLdRegD8(.d);
     table[0x17] = CPU.rla;
-    table[0x19] = makeAddHl(.de);
-    table[0x1A] = makeLdRegU16Ptr(.a, .de);
-    table[0x1B] = makeDecU16Reg(.de);
-    table[0x1C] = makeIncReg(.e);
-    table[0x1D] = makeDecReg(.e);
-    table[0x1E] = makeLdRegD8(.e);
     table[0x1F] = CPU.rra;
-    table[0x18] = makeJumpRelative(.always);
-    table[0x20] = makeJumpRelative(.nz);
-    table[0x21] = makeLdU16RegD16(.hl);
     table[0x22] = CPU.ld_hl_ptr_plus_a;
-    table[0x23] = makeIncU16Reg(.hl);
-    table[0x24] = makeIncReg(.h);
-    table[0x25] = makeDecReg(.h);
-    table[0x26] = makeLdRegD8(.h);
     table[0x27] = CPU.daa;
-    table[0x28] = makeJumpRelative(.z);
-    table[0x29] = makeAddHl(.hl);
     table[0x2A] = CPU.ld_a_hl_ptr_plus;
-    table[0x2B] = makeDecU16Reg(.hl);
-    table[0x2C] = makeIncReg(.l);
-    table[0x2D] = makeDecReg(.l);
-    table[0x2E] = makeLdRegD8(.l);
     table[0x2F] = CPU.cpl;
-    table[0x30] = makeJumpRelative(.nc);
     table[0x31] = CPU.ld_sp_d16;
     table[0x32] = CPU.ld_hl_ptr_minus_a;
-    table[0x33] = makeIncU16Reg(.sp);
     table[0x34] = CPU.inc_hl_ptr;
     table[0x35] = CPU.dec_hl_ptr;
     table[0x36] = CPU.ld_hl_ptr_d8;
     table[0x37] = CPU.scf;
-    table[0x38] = makeJumpRelative(.c);
-    table[0x39] = makeAddHl(.sp);
     table[0x3A] = CPU.ld_a_hl_ptr_minus;
-    table[0x3B] = makeDecU16Reg(.sp);
-    table[0x3C] = makeIncReg(.a);
-    table[0x3D] = makeDecReg(.a);
-    table[0x3E] = makeLdRegD8(.a);
     table[0x3F] = CPU.ccf;
-    table[0x40] = makeLdRegReg(.b, .b);
-    table[0x41] = makeLdRegReg(.b, .c);
-    table[0x42] = makeLdRegReg(.b, .d);
-    table[0x43] = makeLdRegReg(.b, .e);
-    table[0x44] = makeLdRegReg(.b, .h);
-    table[0x45] = makeLdRegReg(.b, .l);
-    table[0x46] = makeLdRegHlPtr(.b);
-    table[0x47] = makeLdRegReg(.b, .a);
-    table[0x48] = makeLdRegReg(.c, .b);
-    table[0x49] = makeLdRegReg(.c, .c);
-    table[0x4A] = makeLdRegReg(.c, .d);
-    table[0x4B] = makeLdRegReg(.c, .e);
-    table[0x4C] = makeLdRegReg(.c, .h);
-    table[0x4D] = makeLdRegReg(.c, .l);
-    table[0x4E] = makeLdRegHlPtr(.c);
-    table[0x4F] = makeLdRegReg(.c, .a);
-    table[0x50] = makeLdRegReg(.d, .b);
-    table[0x51] = makeLdRegReg(.d, .c);
-    table[0x52] = makeLdRegReg(.d, .d);
-    table[0x53] = makeLdRegReg(.d, .e);
-    table[0x54] = makeLdRegReg(.d, .h);
-    table[0x55] = makeLdRegReg(.d, .l);
-    table[0x56] = makeLdRegHlPtr(.d);
-    table[0x57] = makeLdRegReg(.d, .a);
-    table[0x58] = makeLdRegReg(.e, .b);
-    table[0x59] = makeLdRegReg(.e, .c);
-    table[0x5A] = makeLdRegReg(.e, .d);
-    table[0x5B] = makeLdRegReg(.e, .e);
-    table[0x5C] = makeLdRegReg(.e, .h);
-    table[0x5D] = makeLdRegReg(.e, .l);
-    table[0x5E] = makeLdRegHlPtr(.e);
-    table[0x5F] = makeLdRegReg(.e, .a);
-    table[0x60] = makeLdRegReg(.h, .b);
-    table[0x61] = makeLdRegReg(.h, .c);
-    table[0x62] = makeLdRegReg(.h, .d);
-    table[0x63] = makeLdRegReg(.h, .e);
-    table[0x64] = makeLdRegReg(.h, .h);
-    table[0x65] = makeLdRegReg(.h, .l);
-    table[0x66] = makeLdRegHlPtr(.h);
-    table[0x67] = makeLdRegReg(.h, .a);
-    table[0x68] = makeLdRegReg(.l, .b);
-    table[0x69] = makeLdRegReg(.l, .c);
-    table[0x6A] = makeLdRegReg(.l, .d);
-    table[0x6B] = makeLdRegReg(.l, .e);
-    table[0x6C] = makeLdRegReg(.l, .h);
-    table[0x6D] = makeLdRegReg(.l, .l);
-    table[0x6E] = makeLdRegHlPtr(.l);
-    table[0x6F] = makeLdRegReg(.l, .a);
-    table[0x70] = makeLdHlPtrReg(.b);
-    table[0x71] = makeLdHlPtrReg(.c);
-    table[0x72] = makeLdHlPtrReg(.d);
-    table[0x73] = makeLdHlPtrReg(.e);
-    table[0x74] = makeLdHlPtrReg(.h);
-    table[0x75] = makeLdHlPtrReg(.l);
     table[0x76] = CPU.halt;
-    table[0x77] = makeLdHlPtrReg(.a);
-    table[0x78] = makeLdRegReg(.a, .b);
-    table[0x79] = makeLdRegReg(.a, .c);
-    table[0x7A] = makeLdRegReg(.a, .d);
-    table[0x7B] = makeLdRegReg(.a, .e);
-    table[0x7C] = makeLdRegReg(.a, .h);
-    table[0x7D] = makeLdRegReg(.a, .l);
-    table[0x7E] = makeLdRegHlPtr(.a);
-    table[0x7F] = makeLdRegReg(.a, .a);
-    table[0x80] = makeAdd(.register, .b);
-    table[0x81] = makeAdd(.register, .c);
-    table[0x82] = makeAdd(.register, .d);
-    table[0x83] = makeAdd(.register, .e);
-    table[0x84] = makeAdd(.register, .h);
-    table[0x85] = makeAdd(.register, .l);
-    table[0x86] = makeAdd(.hl_ptr, null);
-    table[0x87] = makeAdd(.register, .a);
-    table[0x88] = makeAdc(.register, .b);
-    table[0x89] = makeAdc(.register, .c);
-    table[0x8A] = makeAdc(.register, .d);
-    table[0x8B] = makeAdc(.register, .e);
-    table[0x8C] = makeAdc(.register, .h);
-    table[0x8D] = makeAdc(.register, .l);
-    table[0x8E] = makeAdc(.hl_ptr, null);
-    table[0x8F] = makeAdc(.register, .a);
-    table[0x90] = makeSub(.register, .b);
-    table[0x91] = makeSub(.register, .c);
-    table[0x92] = makeSub(.register, .d);
-    table[0x93] = makeSub(.register, .e);
-    table[0x94] = makeSub(.register, .h);
-    table[0x95] = makeSub(.register, .l);
-    table[0x96] = makeSub(.hl_ptr, null);
-    table[0x97] = makeSub(.register, .a);
-    table[0x98] = makeSbc(.register, .b);
-    table[0x99] = makeSbc(.register, .c);
-    table[0x9A] = makeSbc(.register, .d);
-    table[0x9B] = makeSbc(.register, .e);
-    table[0x9C] = makeSbc(.register, .h);
-    table[0x9D] = makeSbc(.register, .l);
-    table[0x9E] = makeSbc(.hl_ptr, null);
-    table[0x9F] = makeSbc(.register, .a);
-    table[0xA0] = makeAnd(.register, .b);
-    table[0xA1] = makeAnd(.register, .c);
-    table[0xA2] = makeAnd(.register, .d);
-    table[0xA3] = makeAnd(.register, .e);
-    table[0xA4] = makeAnd(.register, .h);
-    table[0xA5] = makeAnd(.register, .l);
-    table[0xA6] = makeAnd(.hl_ptr, null);
-    table[0xA7] = makeAnd(.register, .a);
-    table[0xA8] = makeXor(.register, .b);
-    table[0xA9] = makeXor(.register, .c);
-    table[0xAA] = makeXor(.register, .d);
-    table[0xAB] = makeXor(.register, .e);
-    table[0xAC] = makeXor(.register, .h);
-    table[0xAD] = makeXor(.register, .l);
-    table[0xAE] = makeXor(.hl_ptr, null);
-    table[0xAF] = makeXor(.register, .a);
-    table[0xB0] = makeOr(.register, .b);
-    table[0xB1] = makeOr(.register, .c);
-    table[0xB2] = makeOr(.register, .d);
-    table[0xB3] = makeOr(.register, .e);
-    table[0xB4] = makeOr(.register, .h);
-    table[0xB5] = makeOr(.register, .l);
-    table[0xB6] = makeOr(.hl_ptr, null);
-    table[0xB7] = makeOr(.register, .a);
-    table[0xB8] = makeCp(.register, .b);
-    table[0xB9] = makeCp(.register, .c);
-    table[0xBA] = makeCp(.register, .d);
-    table[0xBB] = makeCp(.register, .e);
-    table[0xBC] = makeCp(.register, .h);
-    table[0xBD] = makeCp(.register, .l);
-    table[0xBE] = makeCp(.hl_ptr, null);
-    table[0xBF] = makeCp(.register, .a);
-    table[0xC0] = makeRet(.nz);
     table[0xC1] = makePop(.bc);
-    table[0xC2] = makeJumpAbsolute(.nz);
-    table[0xC3] = makeJumpAbsolute(.always);
-    table[0xC4] = makeCall(.nz);
     table[0xC5] = makePush(.bc);
     table[0xC6] = makeAdd(.immediate, null);
-    table[0xC7] = makeRST(0xC7);
-    table[0xC8] = makeRet(.z);
     table[0xC9] = makeRet(.always);
-    table[0xCA] = makeJumpAbsolute(.z);
     table[0xCB] = CPU.cb_prefix;
-    table[0xCC] = makeCall(.z);
     table[0xCD] = makeCall(.always);
     table[0xCE] = makeAdc(.immediate, null);
-    table[0xCF] = makeRST(0xCF);
-    table[0xD0] = makeRet(.nc);
     table[0xD1] = makePop(.de);
-    table[0xD2] = makeJumpAbsolute(.nc);
-    table[0xD4] = makeCall(.nc);
     table[0xD5] = makePush(.de);
     table[0xD6] = makeSub(.immediate, null);
-    table[0xD7] = makeRST(0xD7);
-    table[0xD8] = makeRet(.c);
     table[0xD9] = CPU.reti;
-    table[0xDA] = makeJumpAbsolute(.c);
-    table[0xDC] = makeCall(.c);
     table[0xDE] = makeSbc(.immediate, null);
-    table[0xDF] = makeRST(0xDF);
     table[0xE0] = CPU.ld_a8_a;
     table[0xE1] = makePop(.hl);
     table[0xE2] = CPU.ld_c_a;
     table[0xE5] = makePush(.hl);
     table[0xE6] = makeAnd(.immediate, null);
-    table[0xE7] = makeRST(0xE7);
     table[0xE8] = CPU.add_sp_r8;
     table[0xE9] = CPU.jp_hl;
     table[0xEA] = CPU.ld_a16_a;
     table[0xEE] = makeXor(.immediate, null);
-    table[0xEF] = makeRST(0xEF);
     table[0xF0] = CPU.ldh_a_a8;
     table[0xF1] = makePop(.af);
     table[0xF2] = CPU.ldh_a_c;
     table[0xF3] = CPU.di;
     table[0xF5] = makePush(.af);
     table[0xF6] = makeOr(.immediate, null);
-    table[0xF7] = makeRST(0xF7);
     table[0xF8] = CPU.ld_hl_sp_r8;
     table[0xF9] = CPU.ld_sp_hl;
     table[0xFA] = CPU.ld_a_a16;
     table[0xFB] = CPU.ei;
     table[0xFE] = makeCp(.immediate, null);
-    table[0xFF] = makeRST(0xFF);
+
+    // 16-bit LD, INC, DEC, ADD
+    const rr_regs = [_]U16Register{ .bc, .de, .hl, .sp };
+    for (rr_regs, 0..) |rr, i| {
+        if (rr != .sp) table[0x01 + i * 16] = makeLdU16RegD16(rr);
+        table[0x03 + i * 16] = makeIncU16Reg(rr);
+        table[0x0B + i * 16] = makeDecU16Reg(rr);
+        table[0x09 + i * 16] = makeAddHl(rr);
+    }
+
+    // 8-bit INC, DEC, LD d8
+    for (0..8) |i| {
+        const reg = getReg(i);
+        if (reg) |r| {
+            table[i * 8 + 4] = makeIncReg(r);
+            table[i * 8 + 5] = makeDecReg(r);
+            table[i * 8 + 6] = makeLdRegD8(r);
+        }
+    }
+
+    // LD A, (rr) and LD (rr), A for BC/DE
+    for ([_]U16Register{ .bc, .de }, 0..) |rr, i| {
+        table[0x02 + i * 16] = makeLdU16PtrReg(rr, .a);
+        table[0x0A + i * 16] = makeLdRegU16Ptr(.a, rr);
+    }
+
+    // Jumps, Calls, Returns
+    const conds = [_]Conditions{ .nz, .z, .nc, .c };
+    for (conds, 0..) |cond, i| {
+        table[0x20 + i * 8] = makeJumpRelative(cond);
+        table[0xC0 + i * 8] = makeRet(cond);
+        table[0xC2 + i * 8] = makeJumpAbsolute(cond);
+        table[0xC4 + i * 8] = makeCall(cond);
+    }
+    table[0x18] = makeJumpRelative(.always);
+    table[0xC3] = makeJumpAbsolute(.always);
+
+    // LD r, r'
+    for (0..8) |i| {
+        const dst_reg = getReg(i);
+        for (0..8) |j| {
+            const src_reg = getReg(j);
+            const opcode = 0x40 + i * 8 + j;
+            if (opcode == 0x76) continue;
+
+            if (dst_reg) |dst| {
+                if (src_reg) |src| {
+                    table[opcode] = makeLdRegReg(dst, src);
+                } else {
+                    table[opcode] = makeLdRegHlPtr(dst);
+                }
+            } else {
+                if (src_reg) |src| {
+                    table[opcode] = makeLdHlPtrReg(src);
+                }
+            }
+        }
+    }
+
+    // Arithmetic
+    for (0..8) |i| {
+        const reg = getReg(i);
+        const src_type: SourceType = if (reg == null) .hl_ptr else .register;
+        table[0x80 + i] = makeAdd(src_type, reg);
+        table[0x88 + i] = makeAdc(src_type, reg);
+        table[0x90 + i] = makeSub(src_type, reg);
+        table[0x98 + i] = makeSbc(src_type, reg);
+        table[0xA0 + i] = makeAnd(src_type, reg);
+        table[0xA8 + i] = makeXor(src_type, reg);
+        table[0xB0 + i] = makeOr(src_type, reg);
+        table[0xB8 + i] = makeCp(src_type, reg);
+    }
+
+    // RST
+    for (0..8) |i| {
+        const opcode = 0xC7 + i * 8;
+        table[opcode] = makeRST(opcode);
+    }
+
     break :blk table;
 };
 
 const cb_instruction_table = blk: {
     var table = [_]InstructionFn{CPU.unknown_opcode} ** 256;
-    table[0x00] = makeRLC(.b);
-    table[0x01] = makeRLC(.c);
-    table[0x02] = makeRLC(.d);
-    table[0x03] = makeRLC(.e);
-    table[0x04] = makeRLC(.h);
-    table[0x05] = makeRLC(.l);
-    table[0x06] = makeRLC16(.hl);
-    table[0x07] = makeRLC(.a);
-    table[0x08] = makeRRC(.b);
-    table[0x09] = makeRRC(.c);
-    table[0x0A] = makeRRC(.d);
-    table[0x0B] = makeRRC(.e);
-    table[0x0C] = makeRRC(.h);
-    table[0x0D] = makeRRC(.l);
-    table[0x0E] = makeRRC16(.hl);
-    table[0x0F] = makeRRC(.a);
-    table[0x10] = makeRL(.b);
-    table[0x11] = makeRL(.c);
-    table[0x12] = makeRL(.d);
-    table[0x13] = makeRL(.e);
-    table[0x14] = makeRL(.h);
-    table[0x15] = makeRL(.l);
-    table[0x16] = makeRL16(.hl);
-    table[0x17] = makeRL(.a);
-    table[0x18] = makeRR(.b);
-    table[0x19] = makeRR(.c);
-    table[0x1A] = makeRR(.d);
-    table[0x1B] = makeRR(.e);
-    table[0x1C] = makeRR(.h);
-    table[0x1D] = makeRR(.l);
-    table[0x1E] = makeRR16(.hl);
-    table[0x1F] = makeRR(.a);
-    table[0x20] = makeSLA(.b);
-    table[0x21] = makeSLA(.c);
-    table[0x22] = makeSLA(.d);
-    table[0x23] = makeSLA(.e);
-    table[0x24] = makeSLA(.h);
-    table[0x25] = makeSLA(.l);
-    table[0x26] = makeSLA16(.hl);
-    table[0x27] = makeSLA(.a);
-    table[0x28] = makeSRA(.b);
-    table[0x29] = makeSRA(.c);
-    table[0x2A] = makeSRA(.d);
-    table[0x2B] = makeSRA(.e);
-    table[0x2C] = makeSRA(.h);
-    table[0x2D] = makeSRA(.l);
-    table[0x2E] = makeSRA16(.hl);
-    table[0x2F] = makeSRA(.a);
-    table[0x30] = makeSWAP(.register, .b);
-    table[0x31] = makeSWAP(.register, .c);
-    table[0x32] = makeSWAP(.register, .d);
-    table[0x33] = makeSWAP(.register, .e);
-    table[0x34] = makeSWAP(.register, .h);
-    table[0x35] = makeSWAP(.register, .l);
-    table[0x36] = makeSWAP(.hl_ptr, null);
-    table[0x37] = makeSWAP(.register, .a);
 
-    table[0x38] = makeSRL(.b);
-    table[0x39] = makeSRL(.c);
-    table[0x3A] = makeSRL(.d);
-    table[0x3B] = makeSRL(.e);
-    table[0x3C] = makeSRL(.h);
-    table[0x3D] = makeSRL(.l);
-    table[0x3E] = makeSRL16(.hl);
-    table[0x3F] = makeSRL(.a);
-    table[0x40] = makeBIT(0, .register, .b);
-    table[0x41] = makeBIT(0, .register, .c);
-    table[0x42] = makeBIT(0, .register, .d);
-    table[0x43] = makeBIT(0, .register, .e);
-    table[0x44] = makeBIT(0, .register, .h);
-    table[0x45] = makeBIT(0, .register, .l);
-    table[0x46] = makeBIT(0, .hl_ptr, null);
-    table[0x47] = makeBIT(0, .register, .a);
-    table[0x48] = makeBIT(1, .register, .b);
-    table[0x49] = makeBIT(1, .register, .c);
-    table[0x4A] = makeBIT(1, .register, .d);
-    table[0x4B] = makeBIT(1, .register, .e);
-    table[0x4C] = makeBIT(1, .register, .h);
-    table[0x4D] = makeBIT(1, .register, .l);
-    table[0x4E] = makeBIT(1, .hl_ptr, null);
-    table[0x4F] = makeBIT(1, .register, .a);
-    table[0x50] = makeBIT(2, .register, .b);
-    table[0x51] = makeBIT(2, .register, .c);
-    table[0x52] = makeBIT(2, .register, .d);
-    table[0x53] = makeBIT(2, .register, .e);
-    table[0x54] = makeBIT(2, .register, .h);
-    table[0x55] = makeBIT(2, .register, .l);
-    table[0x56] = makeBIT(2, .hl_ptr, null);
-    table[0x57] = makeBIT(2, .register, .a);
-    table[0x58] = makeBIT(3, .register, .b);
-    table[0x59] = makeBIT(3, .register, .c);
-    table[0x5A] = makeBIT(3, .register, .d);
-    table[0x5B] = makeBIT(3, .register, .e);
-    table[0x5C] = makeBIT(3, .register, .h);
-    table[0x5D] = makeBIT(3, .register, .l);
-    table[0x5E] = makeBIT(3, .hl_ptr, null);
-    table[0x5F] = makeBIT(3, .register, .a);
-    table[0x60] = makeBIT(4, .register, .b);
-    table[0x61] = makeBIT(4, .register, .c);
-    table[0x62] = makeBIT(4, .register, .d);
-    table[0x63] = makeBIT(4, .register, .e);
-    table[0x64] = makeBIT(4, .register, .h);
-    table[0x65] = makeBIT(4, .register, .l);
-    table[0x66] = makeBIT(4, .hl_ptr, null);
-    table[0x67] = makeBIT(4, .register, .a);
-    table[0x68] = makeBIT(5, .register, .b);
-    table[0x69] = makeBIT(5, .register, .c);
-    table[0x6A] = makeBIT(5, .register, .d);
-    table[0x6B] = makeBIT(5, .register, .e);
-    table[0x6C] = makeBIT(5, .register, .h);
-    table[0x6D] = makeBIT(5, .register, .l);
-    table[0x6E] = makeBIT(5, .hl_ptr, null);
-    table[0x6F] = makeBIT(5, .register, .a);
-    table[0x70] = makeBIT(6, .register, .b);
-    table[0x71] = makeBIT(6, .register, .c);
-    table[0x72] = makeBIT(6, .register, .d);
-    table[0x73] = makeBIT(6, .register, .e);
-    table[0x74] = makeBIT(6, .register, .h);
-    table[0x75] = makeBIT(6, .register, .l);
-    table[0x76] = makeBIT(6, .hl_ptr, null);
-    table[0x77] = makeBIT(6, .register, .a);
-    table[0x78] = makeBIT(7, .register, .b);
-    table[0x79] = makeBIT(7, .register, .c);
-    table[0x7A] = makeBIT(7, .register, .d);
-    table[0x7B] = makeBIT(7, .register, .e);
-    table[0x7C] = makeBIT(7, .register, .h);
-    table[0x7D] = makeBIT(7, .register, .l);
-    table[0x7E] = makeBIT(7, .hl_ptr, null);
-    table[0x7F] = makeBIT(7, .register, .a);
-    table[0x80] = makeRES(0, .register, .b);
-    table[0x81] = makeRES(0, .register, .c);
-    table[0x82] = makeRES(0, .register, .d);
-    table[0x83] = makeRES(0, .register, .e);
-    table[0x84] = makeRES(0, .register, .h);
-    table[0x85] = makeRES(0, .register, .l);
-    table[0x86] = makeRES(0, .hl_ptr, null);
-    table[0x87] = makeRES(0, .register, .a);
-    table[0x88] = makeRES(1, .register, .b);
-    table[0x89] = makeRES(1, .register, .c);
-    table[0x8A] = makeRES(1, .register, .d);
-    table[0x8B] = makeRES(1, .register, .e);
-    table[0x8C] = makeRES(1, .register, .h);
-    table[0x8D] = makeRES(1, .register, .l);
-    table[0x8E] = makeRES(1, .hl_ptr, null);
-    table[0x8F] = makeRES(1, .register, .a);
-    table[0x90] = makeRES(2, .register, .b);
-    table[0x91] = makeRES(2, .register, .c);
-    table[0x92] = makeRES(2, .register, .d);
-    table[0x93] = makeRES(2, .register, .e);
-    table[0x94] = makeRES(2, .register, .h);
-    table[0x95] = makeRES(2, .register, .l);
-    table[0x96] = makeRES(2, .hl_ptr, null);
-    table[0x97] = makeRES(2, .register, .a);
-    table[0x98] = makeRES(3, .register, .b);
-    table[0x99] = makeRES(3, .register, .c);
-    table[0x9A] = makeRES(3, .register, .d);
-    table[0x9B] = makeRES(3, .register, .e);
-    table[0x9C] = makeRES(3, .register, .h);
-    table[0x9D] = makeRES(3, .register, .l);
-    table[0x9E] = makeRES(3, .hl_ptr, null);
-    table[0x9F] = makeRES(3, .register, .a);
-    table[0xA0] = makeRES(4, .register, .b);
-    table[0xA1] = makeRES(4, .register, .c);
-    table[0xA2] = makeRES(4, .register, .d);
-    table[0xA3] = makeRES(4, .register, .e);
-    table[0xA4] = makeRES(4, .register, .h);
-    table[0xA5] = makeRES(4, .register, .l);
-    table[0xA6] = makeRES(4, .hl_ptr, null);
-    table[0xA7] = makeRES(4, .register, .a);
-    table[0xA8] = makeRES(5, .register, .b);
-    table[0xA9] = makeRES(5, .register, .c);
-    table[0xAA] = makeRES(5, .register, .d);
-    table[0xAB] = makeRES(5, .register, .e);
-    table[0xAC] = makeRES(5, .register, .h);
-    table[0xAD] = makeRES(5, .register, .l);
-    table[0xAE] = makeRES(5, .hl_ptr, null);
-    table[0xAF] = makeRES(5, .register, .a);
-    table[0xB0] = makeRES(6, .register, .b);
-    table[0xB1] = makeRES(6, .register, .c);
-    table[0xB2] = makeRES(6, .register, .d);
-    table[0xB3] = makeRES(6, .register, .e);
-    table[0xB4] = makeRES(6, .register, .h);
-    table[0xB5] = makeRES(6, .register, .l);
-    table[0xB6] = makeRES(6, .hl_ptr, null);
-    table[0xB7] = makeRES(6, .register, .a);
-    table[0xB8] = makeRES(7, .register, .b);
-    table[0xB9] = makeRES(7, .register, .c);
-    table[0xBA] = makeRES(7, .register, .d);
-    table[0xBB] = makeRES(7, .register, .e);
-    table[0xBC] = makeRES(7, .register, .h);
-    table[0xBD] = makeRES(7, .register, .l);
-    table[0xBE] = makeRES(7, .hl_ptr, null);
-    table[0xBF] = makeRES(7, .register, .a);
-    table[0xC0] = makeSET(0, .register, .b);
-    table[0xC1] = makeSET(0, .register, .c);
-    table[0xC2] = makeSET(0, .register, .d);
-    table[0xC3] = makeSET(0, .register, .e);
-    table[0xC4] = makeSET(0, .register, .h);
-    table[0xC5] = makeSET(0, .register, .l);
-    table[0xC6] = makeSET(0, .hl_ptr, null);
-    table[0xC7] = makeSET(0, .register, .a);
-    table[0xC8] = makeSET(1, .register, .b);
-    table[0xC9] = makeSET(1, .register, .c);
-    table[0xCA] = makeSET(1, .register, .d);
-    table[0xCB] = makeSET(1, .register, .e);
-    table[0xCC] = makeSET(1, .register, .h);
-    table[0xCD] = makeSET(1, .register, .l);
-    table[0xCE] = makeSET(1, .hl_ptr, null);
-    table[0xCF] = makeSET(1, .register, .a);
-    table[0xD0] = makeSET(2, .register, .b);
-    table[0xD1] = makeSET(2, .register, .c);
-    table[0xD2] = makeSET(2, .register, .d);
-    table[0xD3] = makeSET(2, .register, .e);
-    table[0xD4] = makeSET(2, .register, .h);
-    table[0xD5] = makeSET(2, .register, .l);
-    table[0xD6] = makeSET(2, .hl_ptr, null);
-    table[0xD7] = makeSET(2, .register, .a);
-    table[0xD8] = makeSET(3, .register, .b);
-    table[0xD9] = makeSET(3, .register, .c);
-    table[0xDA] = makeSET(3, .register, .d);
-    table[0xDB] = makeSET(3, .register, .e);
-    table[0xDC] = makeSET(3, .register, .h);
-    table[0xDD] = makeSET(3, .register, .l);
-    table[0xDE] = makeSET(3, .hl_ptr, null);
-    table[0xDF] = makeSET(3, .register, .a);
-    table[0xE0] = makeSET(4, .register, .b);
-    table[0xE1] = makeSET(4, .register, .c);
-    table[0xE2] = makeSET(4, .register, .d);
-    table[0xE3] = makeSET(4, .register, .e);
-    table[0xE4] = makeSET(4, .register, .h);
-    table[0xE5] = makeSET(4, .register, .l);
-    table[0xE6] = makeSET(4, .hl_ptr, null);
-    table[0xE7] = makeSET(4, .register, .a);
-    table[0xE8] = makeSET(5, .register, .b);
-    table[0xE9] = makeSET(5, .register, .c);
-    table[0xEA] = makeSET(5, .register, .d);
-    table[0xEB] = makeSET(5, .register, .e);
-    table[0xEC] = makeSET(5, .register, .h);
-    table[0xED] = makeSET(5, .register, .l);
-    table[0xEE] = makeSET(5, .hl_ptr, null);
-    table[0xEF] = makeSET(5, .register, .a);
-    table[0xF0] = makeSET(6, .register, .b);
-    table[0xF1] = makeSET(6, .register, .c);
-    table[0xF2] = makeSET(6, .register, .d);
-    table[0xF3] = makeSET(6, .register, .e);
-    table[0xF4] = makeSET(6, .register, .h);
-    table[0xF5] = makeSET(6, .register, .l);
-    table[0xF6] = makeSET(6, .hl_ptr, null);
-    table[0xF7] = makeSET(6, .register, .a);
-    table[0xF8] = makeSET(7, .register, .b);
-    table[0xF9] = makeSET(7, .register, .c);
-    table[0xFA] = makeSET(7, .register, .d);
-    table[0xFB] = makeSET(7, .register, .e);
-    table[0xFC] = makeSET(7, .register, .h);
-    table[0xFD] = makeSET(7, .register, .l);
-    table[0xFE] = makeSET(7, .hl_ptr, null);
-    table[0xFF] = makeSET(7, .register, .a);
+    const getReg = struct {
+        fn f(comptime i: usize) ?Register {
+            return switch (i) {
+                0 => .b,
+                1 => .c,
+                2 => .d,
+                3 => .e,
+                4 => .h,
+                5 => .l,
+                6 => null,
+                7 => .a,
+                else => unreachable,
+            };
+        }
+    }.f;
+
+    for (0..8) |i| {
+        const reg = getReg(i);
+        const src_type: SourceType = if (reg == null) .hl_ptr else .register;
+
+        table[0x00 + i] = if (reg) |r| makeRLC(r) else makeRLC16(.hl);
+        table[0x08 + i] = if (reg) |r| makeRRC(r) else makeRRC16(.hl);
+        table[0x10 + i] = if (reg) |r| makeRL(r) else makeRL16(.hl);
+        table[0x18 + i] = if (reg) |r| makeRR(r) else makeRR16(.hl);
+        table[0x20 + i] = if (reg) |r| makeSLA(r) else makeSLA16(.hl);
+        table[0x28 + i] = if (reg) |r| makeSRA(r) else makeSRA16(.hl);
+        table[0x30 + i] = makeSWAP(src_type, reg);
+        table[0x38 + i] = if (reg) |r| makeSRL(r) else makeSRL16(.hl);
+
+        for (0..8) |bit| {
+            table[0x40 + bit * 8 + i] = makeBIT(@intCast(bit), src_type, reg);
+            table[0x80 + bit * 8 + i] = makeRES(@intCast(bit), src_type, reg);
+            table[0xC0 + bit * 8 + i] = makeSET(@intCast(bit), src_type, reg);
+        }
+    }
+
     break :blk table;
 };
 
@@ -1146,11 +829,11 @@ pub const CPU = struct {
     sp: u16 = 0, // stack pointer
     pc: u16 = 0, // program counter
 
-    memory: MMU = .{},
-
     ime_state: ImeState = .disabled,
     halted: bool = false,
     haltBug: bool = false,
+
+    memory: MMU,
 
     pub fn step(self: *CPU) !void {
         // Handle pending IME enable

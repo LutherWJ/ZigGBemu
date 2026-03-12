@@ -1,6 +1,7 @@
 const std = @import("std");
 const readInt = std.mem.readInt;
 const writeInt = std.mem.writeInt;
+const MBC = @import("mbc.zig").MBC;
 
 pub const InterruptBit = enum(u3) {
     vblank = 0,
@@ -66,8 +67,9 @@ pub const MMU = struct {
     wram1: [WRAMX_SIZE]u8 = [_]u8{0} ** WRAMX_SIZE,
     hram: [HRAM_SIZE]u8 = [_]u8{0} ** HRAM_SIZE,
     oam: [OAM_SIZE]u8 = [_]u8{0} ** OAM_SIZE,
+    mbc: MBC,
 
-    pub fn read(self: *MMU, address: u16, comptime T: type) T {
+    pub fn read(self: *const MMU, address: u16, comptime T: type) T {
         return switch (T) {
             u8 => self.readU8(address),
             u16 => self.readU16(address),
@@ -80,7 +82,9 @@ pub const MMU = struct {
         if (T == u8 or T == comptime_int) {
             const val: u8 = @truncate(value);
             switch (address) {
+                ROM0_START...ROMX_END => self.mbc.write(address, val),
                 VRAM_START...VRAM_END => self.vram[address - VRAM_START] = val,
+                EXTRAM_START...EXTRAM_END => self.mbc.write(address, val),
                 WRAM0_START...WRAM0_END => self.wram0[address - WRAM0_START] = val,
                 WRAMX_START...WRAMX_END => self.wram1[address - WRAMX_START] = val,
                 ECHO_START...ECHO_END => self.write(address - 0x2000, val),
@@ -88,10 +92,10 @@ pub const MMU = struct {
                 HRAM_START...HRAM_END => self.hram[address - HRAM_START] = val,
                 IO_START...IO_END => switch (address) {
                     IF_ADDRESS => self.if_reg = val,
-                    else => {}, // TODO: handle other I/O
+                    else => @panic("Attempted write to unimplemented memory region"),
                 },
                 IE_REG => self.ie_reg = val,
-                else => {}, // TODO: handle other regions
+                else => @panic("Attempted write to unimplemented memory region"),
             }
         } else if (T == u16) {
             self.write(address, @as(u8, @truncate(value)));
@@ -129,14 +133,14 @@ pub const MMU = struct {
         self.if_reg &= ~(@as(u8, 1) << @intFromEnum(interrupt));
     }
 
-    pub fn checkInterrupt(self: *MMU, comptime interrupt: InterruptBit) bool {
+    pub fn checkInterrupt(self: *const MMU, comptime interrupt: InterruptBit) bool {
         if ((self.ie_reg >> @intFromEnum(interrupt) & 1) == 1) {
             return true;
         }
         return false;
     }
 
-    pub fn getPendingInterrupt(self: *MMU) ?InterruptBit {
+    pub fn getPendingInterrupt(self: *const MMU) ?InterruptBit {
         const enabled = self.ie_reg;
         const requested = self.if_reg;
         const pending = enabled & requested;
@@ -151,12 +155,11 @@ pub const MMU = struct {
         return null;
     }
 
-    fn readU8(self: *MMU, address: u16) u8 {
+    fn readU8(self: *const MMU, address: u16) u8 {
         return switch (address) {
-            ROM0_START...ROM0_END => 0, // TODO: handle ROM
-            ROMX_START...ROMX_END => 0,
+            ROM0_START...ROMX_END => self.mbc.read(address),
             VRAM_START...VRAM_END => self.vram[address - VRAM_START],
-            EXTRAM_START...EXTRAM_END => 0,
+            EXTRAM_START...EXTRAM_END => self.mbc.read(address),
             WRAM0_START...WRAM0_END => self.wram0[address - WRAM0_START],
             WRAMX_START...WRAMX_END => self.wram1[address - WRAMX_START],
             ECHO_START...ECHO_END => self.readU8(address - 0x2000),
@@ -171,7 +174,7 @@ pub const MMU = struct {
         };
     }
 
-    fn readU16(self: *MMU, address: u16) u16 {
+    fn readU16(self: *const MMU, address: u16) u16 {
         const low = self.readU8(address);
         const high = self.readU8(address + 1);
         return (@as(u16, high) << 8) | low;
