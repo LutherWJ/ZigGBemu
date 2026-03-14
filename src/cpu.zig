@@ -1,6 +1,8 @@
 const std = @import("std");
-const MMU = @import("mmu.zig").MMU;
-const InterruptBit = @import("mmu.zig").InterruptBit;
+pub const hw = @import("constants.zig");
+pub const MMU = @import("mmu.zig").MMU;
+pub const MBC = @import("mbc.zig").MBC;
+pub const InterruptBit = @import("mmu.zig").InterruptBit;
 
 const InstructionFn = *const fn (*CPU) void;
 const Flag = enum(u3) { z = 7, n = 6, h = 5, c = 4 };
@@ -10,7 +12,6 @@ const Conditions = enum { always, nz, z, nc, c }; // Used for conditional instru
 const ImeState = enum { disabled, enable_pending, enabled }; // interrupts are sometimes delayed one cycle
 const SourceType = enum { register, hl_ptr, immediate };
 
-const HIGH_RAM_BASE_ADDRESS: u16 = 0xFF00;
 const BIT0 = 1;
 const BIT7 = 0b10000000;
 const BIT15 = 0x8000;
@@ -835,7 +836,7 @@ pub const CPU = struct {
 
     memory: MMU,
 
-    pub fn step(self: *CPU) !void {
+    pub fn step(self: *CPU) void {
         // Handle pending IME enable
         if (self.ime_state == .enable_pending) {
             self.ime_state = .enabled;
@@ -866,40 +867,40 @@ pub const CPU = struct {
         self.e = 0xD8;
         self.h = 0x01;
         self.l = 0x4D;
-        self.sp = 0xFFFE;
-        self.pc = 0x0100;
+        self.sp = hw.boot.sp;
+        self.pc = hw.boot.pc;
 
-        self.memory.write(0xFF05, 0x00);
-        self.memory.write(0xFF06, 0x00);
-        self.memory.write(0xFF07, 0x00);
-        self.memory.write(0xFF10, 0x80);
-        self.memory.write(0xFF11, 0xBF);
-        self.memory.write(0xFF12, 0xF3);
-        self.memory.write(0xFF14, 0xBF);
-        self.memory.write(0xFF16, 0x3F);
-        self.memory.write(0xFF17, 0x00);
-        self.memory.write(0xFF19, 0xBF);
-        self.memory.write(0xFF1A, 0x7F);
-        self.memory.write(0xFF1B, 0xFF);
-        self.memory.write(0xFF1C, 0x9F);
-        self.memory.write(0xFF1E, 0xBF);
-        self.memory.write(0xFF20, 0xFF);
-        self.memory.write(0xFF21, 0x00);
-        self.memory.write(0xFF22, 0x00);
-        self.memory.write(0xFF23, 0xBF);
-        self.memory.write(0xFF24, 0x77);
-        self.memory.write(0xFF25, 0xF3);
-        self.memory.write(0xFF26, 0xF1);
-        self.memory.write(0xFF40, 0x91);
-        self.memory.write(0xFF42, 0x00);
-        self.memory.write(0xFF43, 0x00);
-        self.memory.write(0xFF45, 0x00);
-        self.memory.write(0xFF47, 0xFC);
-        self.memory.write(0xFF48, 0xFF);
-        self.memory.write(0xFF49, 0xFF);
-        self.memory.write(0xFF4A, 0x00);
-        self.memory.write(0xFF4B, 0x00);
-        self.memory.write(0xFFFF, 0x00);
+        self.memory.write(hw.io.tima, 0x00);
+        self.memory.write(hw.io.tma, 0x00);
+        self.memory.write(hw.io.tac, 0x00);
+        self.memory.write(hw.io.nr10, 0x80);
+        self.memory.write(hw.io.nr11, 0xBF);
+        self.memory.write(hw.io.nr12, 0xF3);
+        self.memory.write(hw.io.nr14, 0xBF);
+        self.memory.write(hw.io.nr21, 0x3F);
+        self.memory.write(hw.io.nr22, 0x00);
+        self.memory.write(hw.io.nr24, 0xBF);
+        self.memory.write(hw.io.nr30, 0x7F);
+        self.memory.write(hw.io.nr31, 0xFF);
+        self.memory.write(hw.io.nr32, 0x9F);
+        self.memory.write(hw.io.nr34, 0xBF);
+        self.memory.write(hw.io.nr41, 0xFF);
+        self.memory.write(hw.io.nr42, 0x00);
+        self.memory.write(hw.io.nr43, 0x00);
+        self.memory.write(hw.io.nr44, 0xBF);
+        self.memory.write(hw.io.nr50, 0x77);
+        self.memory.write(hw.io.nr51, 0xF3);
+        self.memory.write(hw.io.nr52, 0xF1);
+        self.memory.write(hw.io.lcdc, 0x91);
+        self.memory.write(hw.io.scy, 0x00);
+        self.memory.write(hw.io.scx, 0x00);
+        self.memory.write(hw.io.lyc, 0x00);
+        self.memory.write(hw.io.bgp, 0xFC);
+        self.memory.write(hw.io.obp0, 0xFF);
+        self.memory.write(hw.io.obp1, 0xFF);
+        self.memory.write(hw.io.wy, 0x00);
+        self.memory.write(hw.io.wx, 0x00);
+        self.memory.write(hw.map.ie_reg, 0x00);
     }
 
     fn handleInterrupt(self: *CPU, interrupt: InterruptBit) void {
@@ -910,11 +911,11 @@ pub const CPU = struct {
         self.pushU16(self.pc);
 
         self.pc = switch (interrupt) {
-            .vblank => 0x0040,
-            .lcd => 0x0048,
-            .timer => 0x0050,
-            .serial => 0x0058,
-            .joypad => 0x0060,
+            .vblank => hw.interrupt.vblank,
+            .lcd => hw.interrupt.lcd,
+            .timer => hw.interrupt.timer,
+            .serial => hw.interrupt.serial,
+            .joypad => hw.interrupt.joypad,
         };
     }
 
@@ -956,24 +957,24 @@ pub const CPU = struct {
     fn ld_a8_a(self: *CPU) void {
         const offset = self.memory.read(self.pc, u8);
         self.pc +%= 1;
-        const address = HIGH_RAM_BASE_ADDRESS + offset;
+        const address = hw.map.io.start + offset;
         self.memory.write(address, self.a);
     }
 
     fn ld_c_a(self: *CPU) void {
-        const address: u16 = HIGH_RAM_BASE_ADDRESS + self.c;
+        const address: u16 = hw.map.io.start + self.c;
         self.memory.write(address, self.a);
     }
 
     fn ldh_a_a8(self: *CPU) void {
         const offset = self.memory.read(self.pc, u8);
         self.pc +%= 1;
-        const address = HIGH_RAM_BASE_ADDRESS + offset;
+        const address = hw.map.io.start + offset;
         self.a = self.memory.read(address, u8);
     }
 
     fn ldh_a_c(self: *CPU) void {
-        const address: u16 = HIGH_RAM_BASE_ADDRESS + self.c;
+        const address: u16 = hw.map.io.start + self.c;
         self.a = self.memory.read(address, u8);
     }
 
@@ -1133,32 +1134,27 @@ pub const CPU = struct {
     }
 
     fn daa(self: *CPU) void {
-        const n_flag = self.readFlag(.n);
-        const h_flag = self.readFlag(.h);
-        const c_flag = self.readFlag(.c);
-
-        var carry = false;
+        var a = self.a;
         var correction: u8 = 0;
+        var carry = self.readFlag(.c);
 
-        if (!n_flag) {
-            if (c_flag or self.a > 0x99) {
-                correction |= 0x60;
-                carry = true;
-            }
-            if (h_flag or (self.a & 0x0F) > 0x09) {
-                correction |= 0x06;
-            }
-            self.a +%= correction;
-            if (c_flag) {
-                correction += 0x60;
-            }
-            if (h_flag) {
-                correction |= 0x06;
-            }
-            self.a -%= correction;
+        if (self.readFlag(.h) or (!self.readFlag(.n) and (a & 0x0F) > 0x09)) {
+            correction |= 0x06;
         }
 
-        self.checkFlag(.z, self.a == 0);
+        if (self.readFlag(.c) or (!self.readFlag(.n) and a > 0x99)) {
+            correction |= 0x60;
+            carry = true;
+        }
+
+        if (self.readFlag(.n)) {
+            a -%= correction;
+        } else {
+            a +%= correction;
+        }
+
+        self.a = a;
+        self.checkFlag(.z, a == 0);
         self.unsetFlag(.h);
         self.checkFlag(.c, carry);
     }
@@ -1256,8 +1252,8 @@ pub const CPU = struct {
         self.f &= ~(@as(u8, 1) << @intFromEnum(flag));
     }
 
-    fn readFlag(self: *CPU, comptime flag: Flag) bool {
-        return @as(u8, self.f >> @intFromEnum(flag)) == 1;
+    pub fn readFlag(self: *CPU, comptime flag: Flag) bool {
+        return ((self.f >> @intFromEnum(flag)) & 1) == 1;
     }
 
     fn checkFlag(self: *CPU, comptime flag: Flag, condition: bool) void {

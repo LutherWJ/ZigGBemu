@@ -1,21 +1,23 @@
+const hw = @import("constants.zig");
+
 // mbc0 means no mbc, direct memory mapping.
 
 pub const MBC0 = struct {
     rom: []const u8,
-    ram: []u8,
+    ram: [hw.mbc.ram_bank_size]u8 = [_]u8{0} ** hw.mbc.ram_bank_size,
 
-    pub fn read(self: MBC0, address: u16) u8 {
+    pub fn read(self: *const MBC0, address: u16) u8 {
         return switch (address) {
-            0x0000...0x7FFF => self.rom[address],
-            0xA000...0xBFFF => if (self.ram.len > 0) self.ram[address - 0xA000] else 0xFF,
+            hw.map.rom0.start...hw.map.romx.end => self.rom[address],
+            hw.map.ext_ram.start...hw.map.ext_ram.end => self.ram[address - hw.map.ext_ram.start],
             else => 0xFF,
         };
     }
 
     pub fn write(self: *MBC0, address: u16, value: u8) void {
         switch (address) {
-            0xA000...0xBFFF => if (self.ram.len > 0) {
-                self.ram[address - 0xA000] = value;
+            hw.map.ext_ram.start...hw.map.ext_ram.end => {
+                self.ram[address - hw.map.ext_ram.start] = value;
             },
             else => {},
         }

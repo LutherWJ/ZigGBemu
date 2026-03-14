@@ -1,23 +1,34 @@
 const std = @import("std");
 const testing = std.testing;
 const CPU = @import("cpu").CPU;
+const MMU = @import("cpu").MMU;
+const MBC = @import("cpu").MBC;
+const hw = @import("cpu").hw;
+
+fn create_cpu() CPU {
+    return .{
+        .memory = .{
+            .mbc = .{ .mbc0 = .{ .rom = &[_]u8{0} ** 0x8000 } },
+        },
+    };
+}
 
 test "LD b n8" {
-    var cpu: CPU = .{};
+    var cpu = create_cpu();
     const init_mem = [_]u8{ 0x06, 0x69 };
     run_test(&cpu, &init_mem, 1);
     try testing.expectEqual(@as(u8, 0x69), cpu.b);
 }
 
 test "SWAP B" {
-    var cpu: CPU = .{};
+    var cpu = create_cpu();
     const init_mem = [_]u8{ 0x06, 0b10000011, 0xCB, 0x30 };
     run_test(&cpu, &init_mem, 3);
     try testing.expectEqual(@as(u8, 0b00111000), cpu.b);
 }
 
 test "DAA Addition 0x15 + 0x27 = 0x42" {
-    var cpu: CPU = .{};
+    var cpu = create_cpu();
     // LD A, 0x15; ADD A, 0x27; DAA
     const init_mem = [_]u8{ 0x3E, 0x15, 0xC6, 0x27, 0x27 };
     run_test(&cpu, &init_mem, 3);
@@ -26,7 +37,7 @@ test "DAA Addition 0x15 + 0x27 = 0x42" {
 }
 
 test "DAA Addition Carry 0x83 + 0x91 = 0x74 (Carry)" {
-    var cpu: CPU = .{};
+    var cpu = create_cpu();
     // LD A, 0x83; ADD A, 0x91; DAA
     const init_mem = [_]u8{ 0x3E, 0x83, 0xC6, 0x91, 0x27 };
     run_test(&cpu, &init_mem, 3);
@@ -35,7 +46,7 @@ test "DAA Addition Carry 0x83 + 0x91 = 0x74 (Carry)" {
 }
 
 test "DAA Subtraction 0x42 - 0x15 = 0x27" {
-    var cpu: CPU = .{};
+    var cpu = create_cpu();
     // LD A, 0x42; LD B, 0x15; SUB B; DAA
     const init_mem = [_]u8{ 0x3E, 0x42, 0x06, 0x15, 0x90, 0x27 };
     run_test(&cpu, &init_mem, 4);
@@ -43,7 +54,7 @@ test "DAA Subtraction 0x42 - 0x15 = 0x27" {
 }
 
 test "DAA Subtraction Carry 0x15 - 0x27 = 0x88 (Carry)" {
-    var cpu: CPU = .{};
+    var cpu = create_cpu();
     // LD A, 0x15; LD B, 0x27; SUB B; DAA
     const init_mem = [_]u8{ 0x3E, 0x15, 0x06, 0x27, 0x90, 0x27 };
     run_test(&cpu, &init_mem, 4);
@@ -52,7 +63,7 @@ test "DAA Subtraction Carry 0x15 - 0x27 = 0x88 (Carry)" {
 }
 
 test "DAA Zero Result" {
-    var cpu: CPU = .{};
+    var cpu = create_cpu();
     // XOR A; DAA
     const init_mem = [_]u8{ 0xAF, 0x27 };
     run_test(&cpu, &init_mem, 2);
@@ -61,11 +72,11 @@ test "DAA Zero Result" {
 }
 
 fn run_test(cpu: *CPU, mem: []const u8, steps: u16) void {
-    const start_address = 0xC000;
+    const start_address = hw.map.wram0.start;
     var i: u16 = 0;
 
     cpu.boot();
-    cpu.pc = 0xC000;
+    cpu.pc = hw.map.wram0.start;
 
     while (i < mem.len) : (i += 1) {
         cpu.memory.write(start_address + i, mem[i]);
@@ -73,6 +84,6 @@ fn run_test(cpu: *CPU, mem: []const u8, steps: u16) void {
 
     i = 0;
     while (i < steps) : (i += 1) {
-        cpu.step() catch unreachable;
+        cpu.step();
     }
 }

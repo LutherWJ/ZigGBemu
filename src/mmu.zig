@@ -2,6 +2,7 @@ const std = @import("std");
 const readInt = std.mem.readInt;
 const writeInt = std.mem.writeInt;
 const MBC = @import("mbc.zig").MBC;
+const hw = @import("constants.zig");
 
 pub const InterruptBit = enum(u3) {
     vblank = 0,
@@ -11,62 +12,26 @@ pub const InterruptBit = enum(u3) {
     joypad = 4,
 };
 
-// Memory map constants
-const ROM0_START: u16 = 0x0000;
-const ROM0_END: u16 = 0x3FFF;
-const ROM0_SIZE = ROM0_END - ROM0_START + 1;
-
-const ROMX_START: u16 = 0x4000;
-const ROMX_END: u16 = 0x7FFF;
-const ROMX_SIZE = ROMX_END - ROMX_START + 1;
-
-const VRAM_START: u16 = 0x8000;
-const VRAM_END: u16 = 0x9FFF;
-const VRAM_SIZE = VRAM_END - VRAM_START + 1;
-
-const EXTRAM_START: u16 = 0xA000;
-const EXTRAM_END: u16 = 0xBFFF;
-const EXTRAM_SIZE = EXTRAM_END - EXTRAM_START + 1;
-
-const WRAM0_START: u16 = 0xC000;
-const WRAM0_END: u16 = 0xCFFF;
-const WRAM0_SIZE = WRAM0_END - WRAM0_START + 1;
-
-const WRAMX_START: u16 = 0xD000;
-const WRAMX_END: u16 = 0xDFFF;
-const WRAMX_SIZE = WRAMX_END - WRAMX_START + 1;
-
-const ECHO_START: u16 = 0xE000;
-const ECHO_END: u16 = 0xFDFF;
-const ECHO_SIZE = ECHO_END - ECHO_START + 1;
-
-const OAM_START: u16 = 0xFE00;
-const OAM_END: u16 = 0xFE9F;
-const OAM_SIZE = OAM_END - OAM_START + 1;
-
-const UNUSABLE_START: u16 = 0xFEA0;
-const UNUSABLE_END: u16 = 0xFEFF;
-
-const IO_START: u16 = 0xFF00;
-const IO_END: u16 = 0xFF7F;
-const IO_SIZE = IO_END - IO_START + 1;
-
-const HRAM_START: u16 = 0xFF80;
-const HRAM_END: u16 = 0xFFFE;
-const HRAM_SIZE = HRAM_END - HRAM_START + 1;
-
-const IE_ADDRESS: u16 = 0xFFFF;
-const IE_REG = IE_ADDRESS;
-const IF_ADDRESS: u16 = 0xFF0F;
+pub const Joypad = struct {
+    a: bool = false,
+    b: bool = false,
+    select: bool = false,
+    start: bool = false,
+    right: bool = false,
+    left: bool = false,
+    up: bool = false,
+    down: bool = false,
+};
 
 pub const MMU = struct {
+    vram: [hw.map.vram.size]u8 = [_]u8{0} ** hw.map.vram.size,
+    wram0: [hw.map.wram0.size]u8 = [_]u8{0} ** hw.map.wram0.size,
+    wram1: [hw.map.wramx.size]u8 = [_]u8{0} ** hw.map.wramx.size,
+    hram: [hw.map.hram.size]u8 = [_]u8{0} ** hw.map.hram.size,
+    oam: [hw.map.oam.size]u8 = [_]u8{0} ** hw.map.oam.size,
+    io: [hw.map.io.size]u8 = [_]u8{0} ** hw.map.io.size,
     ie_reg: u8 = 0,
-    if_reg: u8 = 0,
-    vram: [VRAM_SIZE]u8 = [_]u8{0} ** VRAM_SIZE,
-    wram0: [WRAM0_SIZE]u8 = [_]u8{0} ** WRAM0_SIZE,
-    wram1: [WRAMX_SIZE]u8 = [_]u8{0} ** WRAMX_SIZE,
-    hram: [HRAM_SIZE]u8 = [_]u8{0} ** HRAM_SIZE,
-    oam: [OAM_SIZE]u8 = [_]u8{0} ** OAM_SIZE,
+    joypad: Joypad = .{},
     mbc: MBC,
 
     pub fn read(self: *const MMU, address: u16, comptime T: type) T {
@@ -82,39 +47,40 @@ pub const MMU = struct {
         if (T == u8 or T == comptime_int) {
             const val: u8 = @truncate(value);
             switch (address) {
-                ROM0_START...ROMX_END => self.mbc.write(address, val),
-                VRAM_START...VRAM_END => self.vram[address - VRAM_START] = val,
-                EXTRAM_START...EXTRAM_END => self.mbc.write(address, val),
-                WRAM0_START...WRAM0_END => self.wram0[address - WRAM0_START] = val,
-                WRAMX_START...WRAMX_END => self.wram1[address - WRAMX_START] = val,
-                ECHO_START...ECHO_END => self.write(address - 0x2000, val),
-                OAM_START...OAM_END => self.oam[address - OAM_START] = val,
-                HRAM_START...HRAM_END => self.hram[address - HRAM_START] = val,
-                IO_START...IO_END => switch (address) {
-                    IF_ADDRESS => self.if_reg = val,
-                    else => @panic("Attempted write to unimplemented memory region"),
+                hw.map.rom0.start...hw.map.romx.end => self.mbc.write(address, val),
+                hw.map.vram.start...hw.map.vram.end => self.vram[address - hw.map.vram.start] = val,
+                hw.map.ext_ram.start...hw.map.ext_ram.end => self.mbc.write(address, val),
+                hw.map.wram0.start...hw.map.wram0.end => self.wram0[address - hw.map.wram0.start] = val,
+                hw.map.wramx.start...hw.map.wramx.end => self.wram1[address - hw.map.wramx.start] = val,
+                hw.map.echo.start...hw.map.echo.end => self.write(address - 0x2000, val),
+                hw.map.oam.start...hw.map.oam.end => self.oam[address - hw.map.oam.start] = val,
+                hw.map.io.start...hw.map.io.end => switch (address) {
+                    hw.io.joyp => self.io[0] = (val & 0x30) | 0b11000000,
+                    else => self.io[address - hw.map.io.start] = val,
                 },
-                IE_REG => self.ie_reg = val,
-                else => @panic("Attempted write to unimplemented memory region"),
+                hw.map.hram.start...hw.map.hram.end => self.hram[address - hw.map.hram.start] = val,
+                hw.map.ie_reg => self.ie_reg = val,
+                else => {
+                    std.log.warn("Attempted to write to unimplemented memory region at address {x}", .{address});
+                },
             }
         } else if (T == u16) {
             self.write(address, @as(u8, @truncate(value)));
             self.write(address + 1, @as(u8, @truncate(value >> 8)));
         } else {
-            @compileError("Memory.write only supports u8 and u16 types");
+            @compileError("Memory.write only supports u8, 16 and comptime_int");
         }
+    }
+
+    pub fn isAnyButtonPressed(self: *const MMU) bool {
+        const joypad = self.io[hw.io.joyp - hw.map.io.start];
+        return (joypad & 0x0F) != 0x0F;
     }
 
     pub fn loadRom(self: *MMU, rom: []u8) !void {
         _ = self;
         _ = rom;
         // TODO: implement cartridge loading
-    }
-
-    pub fn isAnyButtonPressed(self: *MMU) bool {
-        _ = self;
-        // TODO: implement joypad register read
-        return false;
     }
 
     pub fn enableInturrupt(self: *MMU, comptime interrupt: InterruptBit) void {
@@ -126,11 +92,11 @@ pub const MMU = struct {
     }
 
     pub fn requestInterrupt(self: *MMU, comptime interrupt: InterruptBit) void {
-        self.if_reg |= (@as(u8, 1) << @intFromEnum(interrupt));
+        self.io[hw.io.if_reg - hw.map.io.start] |= (@as(u8, 1) << @intFromEnum(interrupt));
     }
 
     pub fn acknowledgeInterrupt(self: *MMU, interrupt: InterruptBit) void {
-        self.if_reg &= ~(@as(u8, 1) << @intFromEnum(interrupt));
+        self.io[hw.io.if_reg - hw.map.io.start] &= ~(@as(u8, 1) << @intFromEnum(interrupt));
     }
 
     pub fn checkInterrupt(self: *const MMU, comptime interrupt: InterruptBit) bool {
@@ -142,7 +108,7 @@ pub const MMU = struct {
 
     pub fn getPendingInterrupt(self: *const MMU) ?InterruptBit {
         const enabled = self.ie_reg;
-        const requested = self.if_reg;
+        const requested = self.io[hw.io.if_reg - hw.map.io.start];
         const pending = enabled & requested;
 
         // Flags have a priority order.
@@ -157,20 +123,35 @@ pub const MMU = struct {
 
     fn readU8(self: *const MMU, address: u16) u8 {
         return switch (address) {
-            ROM0_START...ROMX_END => self.mbc.read(address),
-            VRAM_START...VRAM_END => self.vram[address - VRAM_START],
-            EXTRAM_START...EXTRAM_END => self.mbc.read(address),
-            WRAM0_START...WRAM0_END => self.wram0[address - WRAM0_START],
-            WRAMX_START...WRAMX_END => self.wram1[address - WRAMX_START],
-            ECHO_START...ECHO_END => self.readU8(address - 0x2000),
-            OAM_START...OAM_END => self.oam[address - OAM_START],
-            UNUSABLE_START...UNUSABLE_END => 0xFF,
-            IO_START...IO_END => switch (address) {
-                IF_ADDRESS => self.if_reg,
-                else => 0,
+            hw.map.rom0.start...hw.map.romx.end => self.mbc.read(address),
+            hw.map.vram.start...hw.map.vram.end => self.vram[address - hw.map.vram.start],
+            hw.map.ext_ram.start...hw.map.ext_ram.end => self.mbc.read(address),
+            hw.map.wram0.start...hw.map.wram0.end => self.wram0[address - hw.map.wram0.start],
+            hw.map.wramx.start...hw.map.wramx.end => self.wram1[address - hw.map.wramx.start],
+            hw.map.echo.start...hw.map.echo.end => self.readU8(address - 0x2000),
+            hw.map.oam.start...hw.map.oam.end => self.oam[address - hw.map.oam.start],
+            hw.map.unusable.start...hw.map.unusable.end => 0xFF,
+            hw.map.io.start...hw.map.io.end => switch (address) {
+                hw.io.joyp => {
+                    var val: u8 = self.io[0] | 0xCF; // bits 6-7 are 1, bits 0-3 are 1 by default
+                    if ((self.io[0] & 0x20) == 0) {
+                        if (self.joypad.start) val &= ~@as(u8, 0x08);
+                        if (self.joypad.select) val &= ~@as(u8, 0x04);
+                        if (self.joypad.b) val &= ~@as(u8, 0x02);
+                        if (self.joypad.a) val &= ~@as(u8, 0x01);
+                    }
+                    if ((self.io[0] & 0x10) == 0) {
+                        if (self.joypad.down) val &= ~@as(u8, 0x08);
+                        if (self.joypad.up) val &= ~@as(u8, 0x04);
+                        if (self.joypad.left) val &= ~@as(u8, 0x02);
+                        if (self.joypad.right) val &= ~@as(u8, 0x01);
+                    }
+                    return val;
+                },
+                else => self.io[address - hw.map.io.start],
             },
-            HRAM_START...HRAM_END => self.hram[address - HRAM_START],
-            IE_REG => self.ie_reg,
+            hw.map.hram.start...hw.map.hram.end => self.hram[address - hw.map.hram.start],
+            hw.map.ie_reg => self.ie_reg,
         };
     }
 

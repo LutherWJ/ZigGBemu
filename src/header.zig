@@ -1,4 +1,4 @@
-const std = @import("std");
+const hw = @import("constants.zig");
 
 pub const Header = struct {
     title: [16]u8,
@@ -9,10 +9,10 @@ pub const Header = struct {
     // Takes a rom as a parameter
     pub fn parse(rom: []const u8) Header {
         return .{
-            .title = rom[0x0134..0x0144].*,
-            .cart_type = rom[0x0147],
-            .rom_size = rom[0x0148],
-            .ram_size = rom[0x0149],
+            .title = rom[hw.header.title_start..hw.header.title_end].*,
+            .cart_type = rom[hw.header.cart_type],
+            .rom_size = rom[hw.header.rom_size],
+            .ram_size = rom[hw.header.ram_size],
         };
     }
 
