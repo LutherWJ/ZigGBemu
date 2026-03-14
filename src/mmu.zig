@@ -1,8 +1,8 @@
 const std = @import("std");
 const readInt = std.mem.readInt;
 const writeInt = std.mem.writeInt;
-const MBC = @import("mbc.zig").MBC;
-const hw = @import("constants.zig");
+const Mbc = @import("mbc.zig").Mbc;
+const hw = @import("hw");
 
 pub const InterruptBit = enum(u3) {
     vblank = 0,
@@ -23,43 +23,43 @@ pub const Joypad = struct {
     down: bool = false,
 };
 
-pub const MMU = struct {
-    vram: [hw.map.vram.size]u8 = [_]u8{0} ** hw.map.vram.size,
-    wram0: [hw.map.wram0.size]u8 = [_]u8{0} ** hw.map.wram0.size,
-    wram1: [hw.map.wramx.size]u8 = [_]u8{0} ** hw.map.wramx.size,
-    hram: [hw.map.hram.size]u8 = [_]u8{0} ** hw.map.hram.size,
-    oam: [hw.map.oam.size]u8 = [_]u8{0} ** hw.map.oam.size,
-    io: [hw.map.io.size]u8 = [_]u8{0} ** hw.map.io.size,
+pub const Mmu = struct {
+    vram: [hw.Map.vram.size]u8 = [_]u8{0} ** hw.Map.vram.size,
+    wram0: [hw.Map.wram0.size]u8 = [_]u8{0} ** hw.Map.wram0.size,
+    wram1: [hw.Map.wramx.size]u8 = [_]u8{0} ** hw.Map.wramx.size,
+    hram: [hw.Map.hram.size]u8 = [_]u8{0} ** hw.Map.hram.size,
+    oam: [hw.Map.oam.size]u8 = [_]u8{0} ** hw.Map.oam.size,
+    io: [hw.Map.io.size]u8 = [_]u8{0} ** hw.Map.io.size,
     ie_reg: u8 = 0,
     joypad: Joypad = .{},
-    mbc: MBC,
+    mbc: Mbc,
 
-    pub fn read(self: *const MMU, address: u16, comptime T: type) T {
+    pub fn read(self: *const Mmu, address: u16, comptime T: type) T {
         return switch (T) {
             u8 => self.readU8(address),
             u16 => self.readU16(address),
-            else => @compileError("MMU.read only supports u8 and u16 types"),
+            else => @compileError("Mmu.read only supports u8 and u16 types"),
         };
     }
 
-    pub fn write(self: *MMU, address: u16, value: anytype) void {
+    pub fn write(self: *Mmu, address: u16, value: anytype) void {
         const T = @TypeOf(value);
         if (T == u8 or T == comptime_int) {
             const val: u8 = @truncate(value);
             switch (address) {
-                hw.map.rom0.start...hw.map.romx.end => self.mbc.write(address, val),
-                hw.map.vram.start...hw.map.vram.end => self.vram[address - hw.map.vram.start] = val,
-                hw.map.ext_ram.start...hw.map.ext_ram.end => self.mbc.write(address, val),
-                hw.map.wram0.start...hw.map.wram0.end => self.wram0[address - hw.map.wram0.start] = val,
-                hw.map.wramx.start...hw.map.wramx.end => self.wram1[address - hw.map.wramx.start] = val,
-                hw.map.echo.start...hw.map.echo.end => self.write(address - 0x2000, val),
-                hw.map.oam.start...hw.map.oam.end => self.oam[address - hw.map.oam.start] = val,
-                hw.map.io.start...hw.map.io.end => switch (address) {
-                    hw.io.joyp => self.io[0] = (val & 0x30) | 0b11000000,
-                    else => self.io[address - hw.map.io.start] = val,
+                hw.Map.rom0.start...hw.Map.romx.end => self.mbc.write(address, val),
+                hw.Map.vram.start...hw.Map.vram.end => self.vram[address - hw.Map.vram.start] = val,
+                hw.Map.ext_ram.start...hw.Map.ext_ram.end => self.mbc.write(address, val),
+                hw.Map.wram0.start...hw.Map.wram0.end => self.wram0[address - hw.Map.wram0.start] = val,
+                hw.Map.wramx.start...hw.Map.wramx.end => self.wram1[address - hw.Map.wramx.start] = val,
+                hw.Map.echo.start...hw.Map.echo.end => self.write(address - 0x2000, val),
+                hw.Map.oam.start...hw.Map.oam.end => self.oam[address - hw.Map.oam.start] = val,
+                hw.Map.io.start...hw.Map.io.end => switch (address) {
+                    hw.Io.joyp => self.io[0] = (val & 0x30) | 0b11000000,
+                    else => self.io[address - hw.Map.io.start] = val,
                 },
-                hw.map.hram.start...hw.map.hram.end => self.hram[address - hw.map.hram.start] = val,
-                hw.map.ie_reg => self.ie_reg = val,
+                hw.Map.hram.start...hw.Map.hram.end => self.hram[address - hw.Map.hram.start] = val,
+                hw.Map.ie_reg => self.ie_reg = val,
                 else => {
                     std.log.warn("Attempted to write to unimplemented memory region at address {x}", .{address});
                 },
@@ -72,43 +72,43 @@ pub const MMU = struct {
         }
     }
 
-    pub fn isAnyButtonPressed(self: *const MMU) bool {
-        const joypad = self.io[hw.io.joyp - hw.map.io.start];
+    pub fn isAnyButtonPressed(self: *const Mmu) bool {
+        const joypad = self.io[hw.Io.joyp - hw.Map.io.start];
         return (joypad & 0x0F) != 0x0F;
     }
 
-    pub fn loadRom(self: *MMU, rom: []u8) !void {
+    pub fn loadRom(self: *Mmu, rom: []u8) !void {
         _ = self;
         _ = rom;
         // TODO: implement cartridge loading
     }
 
-    pub fn enableInturrupt(self: *MMU, comptime interrupt: InterruptBit) void {
+    pub fn enableInterrupt(self: *Mmu, comptime interrupt: InterruptBit) void {
         self.ie_reg |= (1 << @intFromEnum(interrupt));
     }
 
-    pub fn clearInterrupt(self: *MMU, comptime interrupt: InterruptBit) void {
+    pub fn clearInterrupt(self: *Mmu, comptime interrupt: InterruptBit) void {
         self.ie_reg &= ~(@as(u8, 1) << @intFromEnum(interrupt));
     }
 
-    pub fn requestInterrupt(self: *MMU, comptime interrupt: InterruptBit) void {
-        self.io[hw.io.if_reg - hw.map.io.start] |= (@as(u8, 1) << @intFromEnum(interrupt));
+    pub fn requestInterrupt(self: *Mmu, comptime interrupt: InterruptBit) void {
+        self.io[hw.Io.if_reg - hw.Map.io.start] |= (@as(u8, 1) << @intFromEnum(interrupt));
     }
 
-    pub fn acknowledgeInterrupt(self: *MMU, interrupt: InterruptBit) void {
-        self.io[hw.io.if_reg - hw.map.io.start] &= ~(@as(u8, 1) << @intFromEnum(interrupt));
+    pub fn acknowledgeInterrupt(self: *Mmu, interrupt: InterruptBit) void {
+        self.io[hw.Io.if_reg - hw.Map.io.start] &= ~(@as(u8, 1) << @intFromEnum(interrupt));
     }
 
-    pub fn checkInterrupt(self: *const MMU, comptime interrupt: InterruptBit) bool {
+    pub fn checkInterrupt(self: *const Mmu, comptime interrupt: InterruptBit) bool {
         if ((self.ie_reg >> @intFromEnum(interrupt) & 1) == 1) {
             return true;
         }
         return false;
     }
 
-    pub fn getPendingInterrupt(self: *const MMU) ?InterruptBit {
+    pub fn getPendingInterrupt(self: *const Mmu) ?InterruptBit {
         const enabled = self.ie_reg;
-        const requested = self.io[hw.io.if_reg - hw.map.io.start];
+        const requested = self.io[hw.Io.if_reg - hw.Map.io.start];
         const pending = enabled & requested;
 
         // Flags have a priority order.
@@ -121,18 +121,18 @@ pub const MMU = struct {
         return null;
     }
 
-    fn readU8(self: *const MMU, address: u16) u8 {
+    fn readU8(self: *const Mmu, address: u16) u8 {
         return switch (address) {
-            hw.map.rom0.start...hw.map.romx.end => self.mbc.read(address),
-            hw.map.vram.start...hw.map.vram.end => self.vram[address - hw.map.vram.start],
-            hw.map.ext_ram.start...hw.map.ext_ram.end => self.mbc.read(address),
-            hw.map.wram0.start...hw.map.wram0.end => self.wram0[address - hw.map.wram0.start],
-            hw.map.wramx.start...hw.map.wramx.end => self.wram1[address - hw.map.wramx.start],
-            hw.map.echo.start...hw.map.echo.end => self.readU8(address - 0x2000),
-            hw.map.oam.start...hw.map.oam.end => self.oam[address - hw.map.oam.start],
-            hw.map.unusable.start...hw.map.unusable.end => 0xFF,
-            hw.map.io.start...hw.map.io.end => switch (address) {
-                hw.io.joyp => {
+            hw.Map.rom0.start...hw.Map.romx.end => self.mbc.read(address),
+            hw.Map.vram.start...hw.Map.vram.end => self.vram[address - hw.Map.vram.start],
+            hw.Map.ext_ram.start...hw.Map.ext_ram.end => self.mbc.read(address),
+            hw.Map.wram0.start...hw.Map.wram0.end => self.wram0[address - hw.Map.wram0.start],
+            hw.Map.wramx.start...hw.Map.wramx.end => self.wram1[address - hw.Map.wramx.start],
+            hw.Map.echo.start...hw.Map.echo.end => self.readU8(address - 0x2000),
+            hw.Map.oam.start...hw.Map.oam.end => self.oam[address - hw.Map.oam.start],
+            hw.Map.unusable.start...hw.Map.unusable.end => 0xFF,
+            hw.Map.io.start...hw.Map.io.end => switch (address) {
+                hw.Io.joyp => {
                     var val: u8 = self.io[0] | 0xCF; // bits 6-7 are 1, bits 0-3 are 1 by default
                     if ((self.io[0] & 0x20) == 0) {
                         if (self.joypad.start) val &= ~@as(u8, 0x08);
@@ -148,14 +148,14 @@ pub const MMU = struct {
                     }
                     return val;
                 },
-                else => self.io[address - hw.map.io.start],
+                else => self.io[address - hw.Map.io.start],
             },
-            hw.map.hram.start...hw.map.hram.end => self.hram[address - hw.map.hram.start],
-            hw.map.ie_reg => self.ie_reg,
+            hw.Map.hram.start...hw.Map.hram.end => self.hram[address - hw.Map.hram.start],
+            hw.Map.ie_reg => self.ie_reg,
         };
     }
 
-    fn readU16(self: *const MMU, address: u16) u16 {
+    fn readU16(self: *const Mmu, address: u16) u16 {
         const low = self.readU8(address);
         const high = self.readU8(address + 1);
         return (@as(u16, high) << 8) | low;

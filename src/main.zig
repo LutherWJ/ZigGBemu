@@ -6,7 +6,7 @@ pub fn main() !void {
 
     defer {
         const deinit_status = gpa.deinit();
-        if (deinit_status == .leak) @panic("Memory Leak!");
+        if (deinit_status == .leak) @panic("Memory Leak detected");
     }
 
     const allocator = gpa.allocator();
@@ -17,4 +17,3 @@ pub fn main() !void {
 
     _ = emu;
 }
-

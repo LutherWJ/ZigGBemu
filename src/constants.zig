@@ -1,4 +1,9 @@
-pub const map = struct {
+pub const Timings = struct {
+    pub const cpuFrequency: comptime_int = 2 >> 22; // 4.194304 MHz
+    pub const divRegFrequency: comptime_int = 2 >> 14; // 16384 Hz
+};
+
+pub const Map = struct {
     pub const rom0 = struct {
         pub const start: u16 = 0x0000;
         pub const end: u16 = 0x3FFF;
@@ -56,7 +61,7 @@ pub const map = struct {
     pub const ie_reg = 0xFFFF;
 };
 
-pub const io = struct {
+pub const Io = struct {
     pub const joyp: u16 = 0xFF00;
     pub const sb: u16 = 0xFF01;
     pub const sc: u16 = 0xFF02;
@@ -101,7 +106,7 @@ pub const io = struct {
     pub const wx: u16 = 0xFF4B;
 };
 
-pub const interrupt = struct {
+pub const Interrupt = struct {
     pub const vblank: u16 = 0x0040;
     pub const lcd: u16 = 0x0048;
     pub const timer: u16 = 0x0050;
@@ -109,17 +114,17 @@ pub const interrupt = struct {
     pub const joypad: u16 = 0x0060;
 };
 
-pub const boot = struct {
+pub const Boot = struct {
     pub const pc: u16 = 0x0100;
     pub const sp: u16 = 0xFFFE;
 };
 
-pub const mbc = struct {
+pub const Mbc = struct {
     pub const rom_bank_size: usize = 0x4000;
     pub const ram_bank_size: usize = 0x2000;
 };
 
-pub const header = struct {
+pub const Header = struct {
     pub const title_start: usize = 0x0134;
     pub const title_end: usize = 0x0144;
     pub const cart_type: usize = 0x0147;

@@ -4,18 +4,24 @@ A Game Boy emulator implemented in Zig.
 
 ## Project Overview
 
-ZigGBemu is a project focused on building a complete Game Boy emulator using the Zig programming language. The core architecture is designed to be modular, with separate components for the CPU, Memory Management Unit (MMU), and Memory Bank Controllers (MBC).
+ZigGBemu is a modular Game Boy emulator focusing on performance and code clarity using Zig's unique features. It aims to provide a complete emulation of the original Game Boy hardware.
 
 ### Key Technologies
-- **Zig:** The primary programming language used for the entire project.
-- **Zig Build System:** Used for building, running, and testing the emulator.
+- **Zig:** The primary programming language.
+- **Zig Build System:** Manages building, running, and testing the project.
+- **Comptime:** Extensively used for instruction decoding and generation in the CPU.
 
 ### Architecture
-- **`src/main.zig`**: The entry point of the emulator. It handles memory allocation for the CPU and initializes the emulation loop.
-- **`src/cpu.zig`**: Implements the LR35902 CPU instruction set. It uses Zig's `comptime` features to efficiently generate instruction handlers.
-- **`src/mmu.zig`**: Manages the Game Boy's memory map, handles memory reads/writes, and manages interrupt requests and acknowledgments.
-- **`src/mbc1.zig`**: A placeholder for the MBC1 (Memory Bank Controller 1) implementation, which will handle ROM and RAM banking for larger games.
-- **`test/`**: Contains unit tests for the emulator components (e.g., `cpu_test.zig`).
+
+The project follows a modular design, separating the core components of the Game Boy hardware:
+
+- **`src/main.zig`**: Entry point. Initializes the allocator and the emulator instance.
+- **`src/emulator.zig`**: The high-level orchestrator that manages the lifecycle of the CPU and Memory Management Unit (MMU).
+- **`src/cpu.zig`**: Implementation of the LR35902 CPU. It uses `comptime` function generators to create instruction handlers, minimizing runtime overhead.
+- **`src/mmu.zig`**: Handles the Game Boy's 64KB memory map, interrupt requests/acknowledgments, and joypad state.
+- **`src/mbc.zig` & `src/mbc*.zig`**: Implements Memory Bank Controllers (MBC0, MBC1) for handling ROM and RAM banking.
+- **`src/constants.zig`**: Contains hardware-specific constants, including memory addresses, register offsets, and interrupt vectors.
+- **`test/`**: Contains unit tests, specifically `cpu_test.zig` for verifying instruction correctness.
 
 ## Building and Running
 
@@ -38,15 +44,20 @@ zig build test
 
 ## Development Conventions
 
-- **Modular Design**: Keep the CPU, MMU, and other components in separate files and modules to maintain clarity and testability.
-- **Comptime Optimization**: Leverage Zig's `comptime` capabilities for instruction decoding and generation to minimize runtime overhead.
-- **Error Handling**: Use Zig's error handling patterns (`!void`, `try`, `catch`) consistently across the codebase.
-- **Memory Management**: Use the `GeneralPurposeAllocator` for heap allocations and ensure all resources are properly deallocated.
-- **Testing**: Add unit tests for new instructions and components in the `test/` directory.
+- **Modular Design**: Keep hardware components (CPU, MMU, PPU, etc.) in separate files and modules.
+- **Comptime Optimization**: Leverage Zig's `comptime` capabilities for instruction decoding and table generation.
+- **Error Handling**: Use Zig's standard error handling (`!T`, `try`, `catch`) consistently.
+- **Memory Management**: 
+    - Use `GeneralPurposeAllocator` for the main application lifecycle.
+    - Use `ArenaAllocator` (via `Emulator.init`) for emulator-specific allocations to ensure easy cleanup.
+- **Naming Conventions**: Follow standard Zig naming conventions (PascalCase for types, camelCase for functions and variables).
+- **Testing**: Add unit tests for new instructions or hardware components in the `test/` directory.
 
 ## Current Status
 
-- CPU instruction set is partially implemented.
-- MMU handles basic memory regions and interrupts.
-- MBC1 implementation is a placeholder.
-- Video and Audio components are yet to be implemented.
+- **CPU**: Core instruction set implemented via `comptime` generators. Supports CB-prefix instructions.
+- **MMU**: Basic memory mapping and interrupt system implemented.
+- **MBC**: MBC0 and MBC1 support implemented.
+- **Input**: Joypad state handling is present in the MMU.
+- **Video/Audio**: PPU and APU components are currently missing or under development.
+- **Timer**: `timer.zig` exists but integration with the main loop needs verification.

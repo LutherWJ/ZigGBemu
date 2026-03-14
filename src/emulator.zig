@@ -1,12 +1,12 @@
 const std = @import("std");
-const CPU = @import("cpu.zig").CPU;
-const MMU = @import("mmu.zig").MMU;
-const MBC = @import("mbc.zig").MBC;
+const Cpu = @import("cpu.zig").Cpu;
+const Mmu = @import("mmu.zig").Mmu;
+const Mbc = @import("mbc.zig").Mbc;
 
 pub const Emulator = struct {
     _arena: std.heap.ArenaAllocator,
-    _cpu: *CPU,
-    _mbc: *MBC,
+    _cpu: *Cpu,
+    _mbc: *Mbc,
 
     pub fn init(allocator: std.mem.Allocator, rom_buf: []const u8) !*Emulator {
         var arena = std.heap.ArenaAllocator.init(allocator);
@@ -14,10 +14,10 @@ pub const Emulator = struct {
         const aa = arena.allocator();
 
         const rom = try aa.dupe(u8, rom_buf); // CACHE LOCALITY LETS FUCKING GOOOOOO
-        const mbc = try MBC.init(aa, rom);
+        const mbc = try Mbc.init(aa, rom);
         const emu = try aa.create(Emulator);
 
-        emu._cpu = try aa.create(CPU);
+        emu._cpu = try aa.create(Cpu);
         emu._cpu.* = .{
             .memory = .{
                 .mbc = mbc,

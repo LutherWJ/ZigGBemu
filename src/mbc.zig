@@ -1,14 +1,14 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const MBC0 = @import("mbc0.zig").MBC0;
-const MBC1 = @import("mbc1.zig").MBC1;
+const Mbc0 = @import("mbc0.zig").Mbc0;
+const Mbc1 = @import("mbc1.zig").Mbc1;
 const Header = @import("header.zig").Header;
 
-pub const MBC = union(enum) {
-    mbc0: MBC0,
-    mbc1: MBC1,
+pub const Mbc = union(enum) {
+    mbc0: Mbc0,
+    mbc1: Mbc1,
 
-    pub fn init(allocator: std.mem.Allocator, rom: []const u8) !MBC {
+    pub fn init(allocator: std.mem.Allocator, rom: []const u8) !Mbc {
         const header = Header.parse(rom);
 
         return switch (header.cart_type) {
@@ -26,14 +26,14 @@ pub const MBC = union(enum) {
         };
     }
 
-    pub fn read(self: *const MBC, address: u16) u8 {
+    pub fn read(self: *const Mbc, address: u16) u8 {
         return switch (self.*) {
             .mbc0 => |*m| m.read(address),
             .mbc1 => |*m| m.read(address),
         };
     }
 
-    pub fn write(self: *MBC, address: u16, value: u8) void {
+    pub fn write(self: *Mbc, address: u16, value: u8) void {
         switch (self.*) {
             .mbc0 => |*m| m.write(address, value),
             .mbc1 => |*m| m.write(address, value),

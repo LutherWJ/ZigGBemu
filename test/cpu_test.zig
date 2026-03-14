@@ -1,11 +1,11 @@
 const std = @import("std");
 const testing = std.testing;
-const CPU = @import("cpu").CPU;
-const MMU = @import("cpu").MMU;
-const MBC = @import("cpu").MBC;
+const Cpu = @import("cpu").Cpu;
+const Mmu = @import("cpu").Mmu;
+const Mbc = @import("cpu").Mbc;
 const hw = @import("cpu").hw;
 
-fn create_cpu() CPU {
+fn create_cpu() Cpu {
     return .{
         .memory = .{
             .mbc = .{ .mbc0 = .{ .rom = &[_]u8{0} ** 0x8000 } },
@@ -71,12 +71,12 @@ test "DAA Zero Result" {
     try testing.expect(cpu.readFlag(.z));
 }
 
-fn run_test(cpu: *CPU, mem: []const u8, steps: u16) void {
-    const start_address = hw.map.wram0.start;
+fn run_test(cpu: *Cpu, mem: []const u8, steps: u16) void {
+    const start_address = hw.Map.wram0.start;
     var i: u16 = 0;
 
     cpu.boot();
-    cpu.pc = hw.map.wram0.start;
+    cpu.pc = hw.Map.wram0.start;
 
     while (i < mem.len) : (i += 1) {
         cpu.memory.write(start_address + i, mem[i]);
