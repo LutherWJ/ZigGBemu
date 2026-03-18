@@ -11,7 +11,6 @@ const TimerControl = packed struct(u8) {
 
 pub const Timer = struct {
     counter: u16 = 0, // Counts how many Hz have passed since last timer increment
-    div: u8 = 0,
     tima: u8 = 0,
     tma: u8 = 0, // timer modulo
     tac: TimerControl = .{},
@@ -19,9 +18,15 @@ pub const Timer = struct {
     interrupts: *Interrupts,
 
     pub fn writeDiv(self: *Timer) void {
-        // TODO: Implement falling edge bug
-        self.div = 0;
-        self.tima = 0;
+        const watched_bit = self.getWatchedBit();
+        const old_mux: u1 = @truncate(self.counter >> watched_bit);
+
+        self.counter = 0;
+
+        const new_mux: u1 = @truncate(self.counter >> watched_bit);
+        if (old_mux == 1 and new_mux == 0) {
+            self.incrementTimer();
+        }
     }
 
     pub fn writeTima(self: *Timer, value: u8) void {
@@ -42,7 +47,7 @@ pub const Timer = struct {
         const new_mux = (self.counter >> new_watched_bit) & 1;
         const new = self.tac.enable & new_mux;
 
-        // Check for falling edge bug conditions
+        // Check for fallin edge bug conditions
         if (old == 1 and new == 0) {
             self.incrementTimer();
         }
@@ -57,7 +62,7 @@ pub const Timer = struct {
     }
 
     pub fn readDiv(self: *const Timer) u8 {
-        return self.div;
+        return @truncate(self.counter >> 8);
     }
 
     pub fn readTma(self: *const Timer) u8 {
@@ -65,13 +70,17 @@ pub const Timer = struct {
     }
 
     pub fn readTac(self: *const Timer) u8 {
-        return @bitCast(self.tac);
+        return @as(u8, @bitCast(self.tac)) | 0b11111000;
     }
 
-    pub fn tick(self: *Timer, cycles: u8) void {
+    // Takes T-cycles as an argument
+    pub fn tick(self: *Timer, cycles: usize) void {
+        // Function heavily assumes that cycles will always be a multiple of 4.
         std.debug.assert(cycles % hw.Timings.tCyclesPerMCycle == 0);
 
         var cycles_left = cycles;
+
+        // Extract T cycles into machine cycles
         while (cycles_left > 0) : (cycles_left -= hw.Timings.tCyclesPerMCycle) {
             self.tickTimerHardware();
         }
@@ -86,7 +95,14 @@ pub const Timer = struct {
         };
     }
 
+    // Ticks the counter one machine cycle
     fn tickTimerHardware(self: *Timer) void {
+        if (self.pending_interrupt) {
+            self.tima = self.tma;
+            self.interrupts.request(.timer);
+            self.pending_interrupt = false;
+        }
+
         const watched_bit = self.getWatchedBit();
         const before = (self.counter >> watched_bit) & 1;
 
@@ -100,19 +116,11 @@ pub const Timer = struct {
     }
 
     fn incrementTimer(self: *Timer) void {
-        if (self.pending_interrupt) {
-            self.tima = self.tma;
-            self.pending_interrupt = false;
-            self.interrupts.request(.timer);
-            return;
-        }
-
         const result = @addWithOverflow(self.tima, 1);
         self.tima = result[0];
         const overflow: u1 = result[1];
 
         if (overflow == 1) {
-            self.div += 1;
             self.pending_interrupt = true;
             self.tima = 0;
         }

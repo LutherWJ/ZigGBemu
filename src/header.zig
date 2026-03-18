@@ -6,7 +6,6 @@ pub const Header = struct {
     rom_size: u8,
     ram_size: u8, // Just a code for ram size
 
-    // Takes a rom as a parameter
     pub fn parse(rom: []const u8) Header {
         return .{
             .title = rom[hw.Header.title_start..hw.Header.title_end].*,

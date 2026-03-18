@@ -49,6 +49,10 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/interrupts.zig"),
     });
 
+    const emulator_module = b.addModule("emulator", .{
+        .root_source_file = b.path("src/emulator.zig"),
+    });
+
     // 2. Define Module Dependencies (Important for internal imports)
     header_module.addImport("hw", constants_module);
 
@@ -57,11 +61,15 @@ pub fn build(b: *std.Build) void {
     cpu_module.addImport("mbc", mbc_module);
     cpu_module.addImport("interrupts", interrupts_module);
     cpu_module.addImport("timer", timer_module);
+    cpu_module.addImport("io", io_module);
+    cpu_module.addImport("joypad", joypad_module);
 
     mmu_module.addImport("hw", constants_module);
     mmu_module.addImport("mbc", mbc_module);
     mmu_module.addImport("io", io_module);
     mmu_module.addImport("interrupts", interrupts_module);
+    mmu_module.addImport("timer", timer_module);
+    mmu_module.addImport("joypad", joypad_module);
 
     io_module.addImport("hw", constants_module);
     io_module.addImport("interrupts", interrupts_module);
@@ -74,9 +82,18 @@ pub fn build(b: *std.Build) void {
     mbc_module.addImport("mbc0", mbc0_module);
     mbc_module.addImport("mbc1", mbc1_module);
     mbc_module.addImport("header", header_module);
-    
+    mbc_module.addImport("hw", constants_module);
+
     mbc0_module.addImport("hw", constants_module);
     mbc1_module.addImport("hw", constants_module);
+
+    emulator_module.addImport("cpu", cpu_module);
+    emulator_module.addImport("mmu", mmu_module);
+    emulator_module.addImport("mbc", mbc_module);
+    emulator_module.addImport("timer", timer_module);
+    emulator_module.addImport("joypad", joypad_module);
+    emulator_module.addImport("io", io_module);
+    emulator_module.addImport("interrupts", interrupts_module);
 
     // 3. Define Executable
     const exe = b.addExecutable(.{
@@ -85,14 +102,18 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    
+
     // Link modules to the executable
     exe.root_module.addImport("hw", constants_module);
     exe.root_module.addImport("cpu", cpu_module);
     exe.root_module.addImport("mmu", mmu_module);
     exe.root_module.addImport("mbc", mbc_module);
     exe.root_module.addImport("io", io_module);
-    
+    exe.root_module.addImport("interrupts", interrupts_module);
+    exe.root_module.addImport("timer", timer_module);
+    exe.root_module.addImport("joypad", joypad_module);
+    exe.root_module.addImport("emulator", emulator_module);
+
     b.installArtifact(exe);
 
     // Run command
@@ -117,7 +138,7 @@ pub fn build(b: *std.Build) void {
     cpu_tests.root_module.addImport("interrupts", interrupts_module);
     cpu_tests.root_module.addImport("timer", timer_module);
     cpu_tests.root_module.addImport("joypad", joypad_module);
-    
+
     const run_cpu_tests = b.addRunArtifact(cpu_tests);
     test_step.dependOn(&run_cpu_tests.step);
 
@@ -128,7 +149,7 @@ pub fn build(b: *std.Build) void {
     });
     mbc0_tests.root_module.addImport("mbc0", mbc0_module);
     mbc0_tests.root_module.addImport("hw", constants_module);
-    
+
     const run_mbc0_tests = b.addRunArtifact(mbc0_tests);
     test_step.dependOn(&run_mbc0_tests.step);
 
@@ -139,7 +160,19 @@ pub fn build(b: *std.Build) void {
     });
     mbc1_tests.root_module.addImport("mbc1", mbc1_module);
     mbc1_tests.root_module.addImport("hw", constants_module);
-    
+
     const run_mbc1_tests = b.addRunArtifact(mbc1_tests);
     test_step.dependOn(&run_mbc1_tests.step);
+
+    const timer_tests = b.addTest(.{
+        .root_source_file = b.path("test/timer_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    timer_tests.root_module.addImport("timer", timer_module);
+    timer_tests.root_module.addImport("hw", constants_module);
+    timer_tests.root_module.addImport("interrupts", interrupts_module);
+
+    const run_timer_tests = b.addRunArtifact(timer_tests);
+    test_step.dependOn(&run_timer_tests.step);
 }

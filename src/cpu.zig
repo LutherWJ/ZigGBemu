@@ -904,8 +904,7 @@ pub const Cpu = struct {
         }
 
         const cycles = instruction_table[opcode](self);
-
-        self.timer.tick(cycles);
+        self.timer.tick(@as(usize, cycles));
     }
 
     // Fast boot implementation. Initializes memory to the post boot state and does nothing more.
