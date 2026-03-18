@@ -1,8 +1,8 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const Mbc0 = @import("mbc0.zig").Mbc0;
-const Mbc1 = @import("mbc1.zig").Mbc1;
-const Header = @import("header.zig").Header;
+const Mbc0 = @import("mbc0").Mbc0;
+const Mbc1 = @import("mbc1").Mbc1;
+const Header = @import("header").Header;
 
 pub const Mbc = union(enum) {
     mbc0: Mbc0,

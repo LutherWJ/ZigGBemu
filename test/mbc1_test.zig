@@ -1,7 +1,7 @@
 const std = @import("std");
 const testing = std.testing;
 const Mbc1 = @import("mbc1").Mbc1;
-const hw = @import("constants");
+const hw = @import("hw");
 
 fn setup_test_rom() [128 * hw.Mbc.rom_bank_size]u8 {
     var rom = [_]u8{0} ** (128 * hw.Mbc.rom_bank_size);

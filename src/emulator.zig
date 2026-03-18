@@ -1,31 +1,64 @@
 const std = @import("std");
-const Cpu = @import("cpu.zig").Cpu;
-const Mmu = @import("mmu.zig").Mmu;
-const Mbc = @import("mbc.zig").Mbc;
+const Cpu = @import("cpu").Cpu;
+const Mmu = @import("mmu").Mmu;
+const Mbc = @import("mbc").Mbc;
+const Timer = @import("timer").Timer;
+const Joypad = @import("joypad").Joypad;
+const Io = @import("io").Io;
+const Interrupts = @import("interrupts").Interrupts;
 
 pub const Emulator = struct {
     _arena: std.heap.ArenaAllocator,
-    _cpu: *Cpu,
-    _mbc: *Mbc,
+    interrupts: *Interrupts,
+    timer: *Timer,
+    joypad: *Joypad,
+    io: *Io,
+    mmu: *Mmu,
+    mbc: *Mbc,
+    cpu: *Cpu,
 
     pub fn init(allocator: std.mem.Allocator, rom_buf: []const u8) !*Emulator {
         var arena = std.heap.ArenaAllocator.init(allocator);
         errdefer arena.deinit();
         const aa = arena.allocator();
 
-        const rom = try aa.dupe(u8, rom_buf); // CACHE LOCALITY LETS FUCKING GOOOOOO
-        const mbc = try Mbc.init(aa, rom);
-        const emu = try aa.create(Emulator);
+        const rom = try aa.dupe(u8, rom_buf);
 
-        emu._cpu = try aa.create(Cpu);
-        emu._cpu.* = .{
-            .memory = .{
-                .mbc = mbc,
-            },
+        const emu = try aa.create(Emulator);
+        emu._arena = arena;
+
+        emu.interrupts = try aa.create(Interrupts);
+        emu.interrupts.* = .{};
+
+        emu.timer = try aa.create(Timer);
+        emu.timer.* = .{ .interrupts = emu.interrupts };
+
+        emu.joypad = try aa.create(Joypad);
+        emu.joypad.* = .{};
+
+        emu.io = try aa.create(Io);
+        emu.io.* = .{
+            .timer = emu.timer,
+            .joypad = emu.joypad,
+            .interrupts = emu.interrupts,
         };
 
-        emu._arena = arena;
-        emu._mbc = &emu._cpu.memory.mbc;
+        emu.mbc = try aa.create(Mbc);
+        emu.mbc.* = try Mbc.init(aa, rom);
+
+        emu.mmu = try aa.create(Mmu);
+        emu.mmu.* = .{
+            .interrupts = emu.interrupts,
+            .io = emu.io,
+            .mbc = emu.mbc,
+        };
+
+        emu.cpu = try aa.create(Cpu);
+        emu.cpu.* = .{
+            .mmu = emu.mmu,
+            .interrupts = emu.interrupts,
+            .timer = emu.timer,
+        };
 
         return emu;
     }

@@ -1,7 +1,7 @@
 const std = @import("std");
 const testing = std.testing;
 const Mbc0 = @import("mbc0").Mbc0;
-const hw = @import("constants");
+const hw = @import("hw");
 
 test "MBC0: ROM read" {
     std.debug.print("Running MBC0: ROM read...\n", .{});

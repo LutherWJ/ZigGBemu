@@ -1,6 +1,7 @@
 pub const Timings = struct {
     pub const cpuFrequency: comptime_int = 2 >> 22; // 4.194304 MHz
     pub const divRegFrequency: comptime_int = 2 >> 14; // 16384 Hz
+    pub const tCyclesPerMCycle: comptime_int = 4;
 };
 
 pub const Map = struct {
