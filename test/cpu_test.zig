@@ -7,6 +7,7 @@ const Timer = @import("timer").Timer;
 const Joypad = @import("joypad").Joypad;
 const Io = @import("io").Io;
 const Interrupts = @import("interrupts").Interrupts;
+const Sdt = @import("sdt").Sdt;
 const hw = @import("hw");
 
 const TestContext = struct {
@@ -21,6 +22,9 @@ const TestContext = struct {
         const interrupts = try aa.create(Interrupts);
         interrupts.* = .{};
 
+        const sdt = try aa.create(Sdt);
+        sdt.* = .{};
+
         const timer = try aa.create(Timer);
         timer.* = .{ .interrupts = interrupts };
 
@@ -32,6 +36,7 @@ const TestContext = struct {
             .timer = timer,
             .joypad = joypad,
             .interrupts = interrupts,
+            .sdt = sdt,
         };
 
         const rom_data = try aa.create([0x8000]u8);
@@ -52,6 +57,7 @@ const TestContext = struct {
             .mmu = mmu,
             .interrupts = interrupts,
             .timer = timer,
+            .sdt = sdt,
         };
 
         return .{
@@ -143,6 +149,6 @@ fn run_test(cpu: *Cpu, mem: []const u8, steps: u16) void {
 
     i = 0;
     while (i < steps) : (i += 1) {
-        cpu.step();
+        _ = cpu.step();
     }
 }

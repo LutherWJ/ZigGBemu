@@ -74,7 +74,7 @@ pub const Timer = struct {
     }
 
     // Takes T-cycles as an argument
-    pub fn tick(self: *Timer, cycles: usize) void {
+    pub fn tick(self: *Timer, cycles: u32) void {
         // Function heavily assumes that cycles will always be a multiple of 4.
         std.debug.assert(cycles % hw.Timings.tCyclesPerMCycle == 0);
 

@@ -4,96 +4,38 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // 1. Define Modules
-    const constants_module = b.addModule("hw", .{
-        .root_source_file = b.path("src/constants.zig"),
-    });
+    // 1. Define Internal Modules
+    const ModuleDef = struct { name: []const u8, path: []const u8, mod: *std.Build.Module = undefined };
+    var internal_modules = [_]ModuleDef{
+        .{ .name = "hw", .path = "src/constants.zig" },
+        .{ .name = "mbc", .path = "src/mbc.zig" },
+        .{ .name = "io", .path = "src/io.zig" },
+        .{ .name = "mmu", .path = "src/mmu.zig" },
+        .{ .name = "cpu", .path = "src/cpu.zig" },
+        .{ .name = "mbc0", .path = "src/mbc0.zig" },
+        .{ .name = "mbc1", .path = "src/mbc1.zig" },
+        .{ .name = "header", .path = "src/header.zig" },
+        .{ .name = "joypad", .path = "src/joypad.zig" },
+        .{ .name = "timer", .path = "src/timer.zig" },
+        .{ .name = "interrupts", .path = "src/interrupts.zig" },
+        .{ .name = "sdt", .path = "src/sdt.zig" },
+        .{ .name = "emulator", .path = "src/emulator.zig" },
+    };
 
-    const mbc_module = b.addModule("mbc", .{
-        .root_source_file = b.path("src/mbc.zig"),
-    });
+    // 2. Initialize and Link Modules
+    for (&internal_modules) |*m| {
+        m.mod = b.addModule(m.name, .{ .root_source_file = b.path(m.path) });
+    }
 
-    const io_module = b.addModule("io", .{
-        .root_source_file = b.path("src/io.zig"),
-    });
-
-    const mmu_module = b.addModule("mmu", .{
-        .root_source_file = b.path("src/mmu.zig"),
-    });
-
-    const cpu_module = b.addModule("cpu", .{
-        .root_source_file = b.path("src/cpu.zig"),
-    });
-
-    const mbc0_module = b.addModule("mbc0", .{
-        .root_source_file = b.path("src/mbc0.zig"),
-    });
-
-    const mbc1_module = b.addModule("mbc1", .{
-        .root_source_file = b.path("src/mbc1.zig"),
-    });
-
-    const header_module = b.addModule("header", .{
-        .root_source_file = b.path("src/header.zig"),
-    });
-
-    const joypad_module = b.addModule("joypad", .{
-        .root_source_file = b.path("src/joypad.zig"),
-    });
-
-    const timer_module = b.addModule("timer", .{
-        .root_source_file = b.path("src/timer.zig"),
-    });
-
-    const interrupts_module = b.addModule("interrupts", .{
-        .root_source_file = b.path("src/interrupts.zig"),
-    });
-
-    const emulator_module = b.addModule("emulator", .{
-        .root_source_file = b.path("src/emulator.zig"),
-    });
-
-    // 2. Define Module Dependencies (Important for internal imports)
-    header_module.addImport("hw", constants_module);
-
-    cpu_module.addImport("hw", constants_module);
-    cpu_module.addImport("mmu", mmu_module);
-    cpu_module.addImport("mbc", mbc_module);
-    cpu_module.addImport("interrupts", interrupts_module);
-    cpu_module.addImport("timer", timer_module);
-    cpu_module.addImport("io", io_module);
-    cpu_module.addImport("joypad", joypad_module);
-
-    mmu_module.addImport("hw", constants_module);
-    mmu_module.addImport("mbc", mbc_module);
-    mmu_module.addImport("io", io_module);
-    mmu_module.addImport("interrupts", interrupts_module);
-    mmu_module.addImport("timer", timer_module);
-    mmu_module.addImport("joypad", joypad_module);
-
-    io_module.addImport("hw", constants_module);
-    io_module.addImport("interrupts", interrupts_module);
-    io_module.addImport("timer", timer_module);
-    io_module.addImport("joypad", joypad_module);
-
-    timer_module.addImport("hw", constants_module);
-    timer_module.addImport("interrupts", interrupts_module);
-
-    mbc_module.addImport("mbc0", mbc0_module);
-    mbc_module.addImport("mbc1", mbc1_module);
-    mbc_module.addImport("header", header_module);
-    mbc_module.addImport("hw", constants_module);
-
-    mbc0_module.addImport("hw", constants_module);
-    mbc1_module.addImport("hw", constants_module);
-
-    emulator_module.addImport("cpu", cpu_module);
-    emulator_module.addImport("mmu", mmu_module);
-    emulator_module.addImport("mbc", mbc_module);
-    emulator_module.addImport("timer", timer_module);
-    emulator_module.addImport("joypad", joypad_module);
-    emulator_module.addImport("io", io_module);
-    emulator_module.addImport("interrupts", interrupts_module);
+    // Link every module to every other module (except itself)
+    // This removes the need to manually specify dependencies between internal files.
+    for (internal_modules) |m| {
+        for (internal_modules) |other| {
+            if (!std.mem.eql(u8, m.name, other.name)) {
+                m.mod.addImport(other.name, other.mod);
+            }
+        }
+    }
 
     // 3. Define Executable
     const exe = b.addExecutable(.{
@@ -103,16 +45,10 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // Link modules to the executable
-    exe.root_module.addImport("hw", constants_module);
-    exe.root_module.addImport("cpu", cpu_module);
-    exe.root_module.addImport("mmu", mmu_module);
-    exe.root_module.addImport("mbc", mbc_module);
-    exe.root_module.addImport("io", io_module);
-    exe.root_module.addImport("interrupts", interrupts_module);
-    exe.root_module.addImport("timer", timer_module);
-    exe.root_module.addImport("joypad", joypad_module);
-    exe.root_module.addImport("emulator", emulator_module);
+    // Link all modules to the executable
+    for (internal_modules) |m| {
+        exe.root_module.addImport(m.name, m.mod);
+    }
 
     b.installArtifact(exe);
 
@@ -125,54 +61,26 @@ pub fn build(b: *std.Build) void {
     // 4. Define Tests
     const test_step = b.step("test", "Run unit tests");
 
-    const cpu_tests = b.addTest(.{
-        .root_source_file = b.path("test/cpu_test.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    cpu_tests.root_module.addImport("cpu", cpu_module);
-    cpu_tests.root_module.addImport("hw", constants_module);
-    cpu_tests.root_module.addImport("mmu", mmu_module);
-    cpu_tests.root_module.addImport("mbc", mbc_module);
-    cpu_tests.root_module.addImport("io", io_module);
-    cpu_tests.root_module.addImport("interrupts", interrupts_module);
-    cpu_tests.root_module.addImport("timer", timer_module);
-    cpu_tests.root_module.addImport("joypad", joypad_module);
+    const tests = [_]struct { name: []const u8, path: []const u8 }{
+        .{ .name = "cpu", .path = "test/cpu_test.zig" },
+        .{ .name = "mbc0", .path = "test/mbc0_test.zig" },
+        .{ .name = "mbc1", .path = "test/mbc1_test.zig" },
+        .{ .name = "timer", .path = "test/timer_test.zig" },
+    };
 
-    const run_cpu_tests = b.addRunArtifact(cpu_tests);
-    test_step.dependOn(&run_cpu_tests.step);
+    for (tests) |t| {
+        const unit_test = b.addTest(.{
+            .root_source_file = b.path(t.path),
+            .target = target,
+            .optimize = optimize,
+        });
 
-    const mbc0_tests = b.addTest(.{
-        .root_source_file = b.path("test/mbc0_test.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    mbc0_tests.root_module.addImport("mbc0", mbc0_module);
-    mbc0_tests.root_module.addImport("hw", constants_module);
+        // Link all internal modules to every test
+        for (internal_modules) |m| {
+            unit_test.root_module.addImport(m.name, m.mod);
+        }
 
-    const run_mbc0_tests = b.addRunArtifact(mbc0_tests);
-    test_step.dependOn(&run_mbc0_tests.step);
-
-    const mbc1_tests = b.addTest(.{
-        .root_source_file = b.path("test/mbc1_test.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    mbc1_tests.root_module.addImport("mbc1", mbc1_module);
-    mbc1_tests.root_module.addImport("hw", constants_module);
-
-    const run_mbc1_tests = b.addRunArtifact(mbc1_tests);
-    test_step.dependOn(&run_mbc1_tests.step);
-
-    const timer_tests = b.addTest(.{
-        .root_source_file = b.path("test/timer_test.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    timer_tests.root_module.addImport("timer", timer_module);
-    timer_tests.root_module.addImport("hw", constants_module);
-    timer_tests.root_module.addImport("interrupts", interrupts_module);
-
-    const run_timer_tests = b.addRunArtifact(timer_tests);
-    test_step.dependOn(&run_timer_tests.step);
+        const run_unit_test = b.addRunArtifact(unit_test);
+        test_step.dependOn(&run_unit_test.step);
+    }
 }

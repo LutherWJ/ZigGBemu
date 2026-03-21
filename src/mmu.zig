@@ -38,11 +38,11 @@ pub const Mmu = struct {
                 hw.Map.wramx.start...hw.Map.wramx.end => self.wram1[address - hw.Map.wramx.start] = val,
                 hw.Map.echo.start...hw.Map.echo.end => self.write(address - 0x2000, val),
                 hw.Map.oam.start...hw.Map.oam.end => self.oam[address - hw.Map.oam.start] = val,
-                hw.Map.io.start...hw.Map.io.end => self.io.write(address - hw.Map.io.start, val),
+                hw.Map.io.start...hw.Map.io.end => self.io.write(address, val),
                 hw.Map.hram.start...hw.Map.hram.end => self.hram[address - hw.Map.hram.start] = val,
                 hw.Map.ie_reg => self.interrupts.ie = val,
                 else => {
-                    std.log.warn("Attempted to write to unimplemented memory region at address {x}", .{address});
+                    //std.log.warn("Attempted to write to unimplemented memory region at address {x}", .{address});
                 },
             }
         } else if (T == u16) {
@@ -54,7 +54,7 @@ pub const Mmu = struct {
     }
 
     pub fn isAnyButtonPressed(self: *const Mmu) bool {
-        const joypad = self.io.read(hw.Io.joyp - hw.Map.io.start);
+        const joypad = self.io.read(hw.Io.joyp);
         return (joypad & 0x0F) != 0x0F;
     }
 
@@ -92,7 +92,7 @@ pub const Mmu = struct {
             hw.Map.echo.start...hw.Map.echo.end => self.readU8(address - 0x2000),
             hw.Map.oam.start...hw.Map.oam.end => self.oam[address - hw.Map.oam.start],
             hw.Map.unusable.start...hw.Map.unusable.end => 0xFF,
-            hw.Map.io.start...hw.Map.io.end => self.io.read(address - hw.Map.io.start),
+            hw.Map.io.start...hw.Map.io.end => self.io.read(address),
             hw.Map.hram.start...hw.Map.hram.end => self.hram[address - hw.Map.hram.start],
             hw.Map.ie_reg => self.interrupts.ie,
         };

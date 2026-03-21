@@ -6,12 +6,15 @@ const Timer = @import("timer").Timer;
 const Joypad = @import("joypad").Joypad;
 const Io = @import("io").Io;
 const Interrupts = @import("interrupts").Interrupts;
+const Sdt = @import("sdt").Sdt;
+const hw = @import("hw");
 
 pub const Emulator = struct {
     _arena: std.heap.ArenaAllocator,
     interrupts: *Interrupts,
     timer: *Timer,
     joypad: *Joypad,
+    sdt: *Sdt,
     io: *Io,
     mmu: *Mmu,
     mbc: *Mbc,
@@ -36,11 +39,15 @@ pub const Emulator = struct {
         emu.joypad = try aa.create(Joypad);
         emu.joypad.* = .{};
 
+        emu.sdt = try aa.create(Sdt);
+        emu.sdt.* = .{};
+
         emu.io = try aa.create(Io);
         emu.io.* = .{
             .timer = emu.timer,
             .joypad = emu.joypad,
             .interrupts = emu.interrupts,
+            .sdt = emu.sdt,
         };
 
         emu.mbc = try aa.create(Mbc);
@@ -58,16 +65,20 @@ pub const Emulator = struct {
             .mmu = emu.mmu,
             .interrupts = emu.interrupts,
             .timer = emu.timer,
+            .sdt = emu.sdt,
         };
+        emu.cpu.boot();
 
         return emu;
     }
-
     pub fn runFrame(self: *Emulator) void {
-        _ = self;
+        var cycles: u32 = 0;
+        while (cycles < hw.Timings.cyclesPerFrame) {
+            cycles += self.cpu.step();
+        }
     }
 
-    pub fn deinit(self: *Emulator) !void {
-        try self._arena.deinit();
+    pub fn deinit(self: *Emulator) void {
+        self._arena.deinit();
     }
 };
