@@ -435,7 +435,6 @@ fn makeRR(comptime src_type: SourceType, comptime reg_name: ?Register) Instructi
         }
     }.f;
 }
-}
 
 fn makeRL(comptime src_type: SourceType, comptime reg_name: ?Register) InstructionFn {
     return struct {
@@ -459,8 +458,6 @@ fn makeRL(comptime src_type: SourceType, comptime reg_name: ?Register) Instructi
         }
     }.f;
 }
-
-fn makeBIT(comptime bit_num: u3, comptime src_type: SourceType, comptime reg: ?Register) InstructionFn {
 
 fn makeSLA(comptime src_type: SourceType, comptime reg_name: ?Register) InstructionFn {
     return struct {
@@ -579,7 +576,7 @@ fn makeSET(comptime bit_num: u3, comptime src_type: SourceType, comptime reg: ?R
     }.f;
 }
 
-fn makeSWAP(comptime src: SourceType, reg_name: ?Register) InstructionFn {
+fn makeSWAP(comptime src: SourceType, comptime reg_name: ?Register) InstructionFn {
     return struct {
         fn f(cpu: *Cpu) u32 {
             switch (src) {
@@ -784,14 +781,14 @@ const cb_instruction_table = blk: {
         const reg = getReg(i);
         const src_type: SourceType = if (reg == null) .hl_ptr else .register;
 
-        table[0x00 + i] = if (reg) |r| makeRLC(r) else Cpu.rlc_hl;
-        table[0x08 + i] = if (reg) |r| makeRRC(r) else Cpu.rrc_hl;
-        table[0x10 + i] = if (reg) |r| makeRL(r) else makeRL16(.hl);
-        table[0x18 + i] = if (reg) |r| makeRR(r) else makeRR16(.hl);
-        table[0x20 + i] = if (reg) |r| makeSLA(r) else makeSLA16(.hl);
-        table[0x28 + i] = if (reg) |r| makeSRA(r) else makeSRA16(.hl);
+        table[0x00 + i] = makeRLC(src_type, reg);
+        table[0x08 + i] = makeRRC(src_type, reg);
+        table[0x10 + i] = makeRL(src_type, reg);
+        table[0x18 + i] = makeRR(src_type, reg);
+        table[0x20 + i] = makeSLA(src_type, reg);
+        table[0x28 + i] = makeSRA(src_type, reg);
         table[0x30 + i] = makeSWAP(src_type, reg);
-        table[0x38 + i] = if (reg) |r| makeSRL(r) else makeSRL16(.hl);
+        table[0x38 + i] = makeSRL(src_type, reg);
 
         for (0..8) |bit| {
             table[0x40 + bit * 8 + i] = makeBIT(@intCast(bit), src_type, reg);
@@ -830,16 +827,15 @@ pub const Cpu = struct {
         defer self.timer.tick(cycles);
         defer self.sdt.tick(cycles);
 
-        // Handle pending IME enable
-        if (self.ime_state == .enable_pending) {
-            self.ime_state = .enabled;
-        }
-
         if (self.interrupts.getPending()) |interrupt| {
             self.halted = false;
-            cycles += self.handleInterrupt(interrupt);
-            // TODO: Not 100% on how this works
+            if (self.ime_state == .enabled) {
+                cycles += self.handleInterrupt(interrupt);
+                return cycles; // Exit early if jumping to handler.
+            }
         }
+
+        if (self.ime_state == .enable_pending) self.ime_state = .enabled;
 
         if (self.halted) {
             cycles += 4;
