@@ -136,6 +136,119 @@ test "DAA Zero Result" {
     try testing.expect(ctx.cpu.readFlag(.z));
 }
 
+test "ADC A, E (no carry in, no carry out)" {
+    var ctx = try TestContext.init();
+    defer ctx.deinit();
+    // OR A (clear C); LD A, 0x10; LD E, 0x05; ADC A, E
+    const init_mem = [_]u8{ 0xB7, 0x3E, 0x10, 0x1E, 0x05, 0x8B };
+    run_test(ctx.cpu, &init_mem, 4);
+    try testing.expectEqual(@as(u8, 0x15), ctx.cpu.a);
+    try testing.expect(!ctx.cpu.readFlag(.z));
+    try testing.expect(!ctx.cpu.readFlag(.n));
+    try testing.expect(!ctx.cpu.readFlag(.h));
+    try testing.expect(!ctx.cpu.readFlag(.c));
+}
+
+test "ADC A, E (carry in, no carry out)" {
+    var ctx = try TestContext.init();
+    defer ctx.deinit();
+    // SCF (set carry); LD A, 0x10; LD E, 0x05; ADC A, E
+    const init_mem = [_]u8{ 0x37, 0x3E, 0x10, 0x1E, 0x05, 0x8B };
+    run_test(ctx.cpu, &init_mem, 4);
+    try testing.expectEqual(@as(u8, 0x16), ctx.cpu.a);
+    try testing.expect(!ctx.cpu.readFlag(.z));
+    try testing.expect(!ctx.cpu.readFlag(.n));
+    try testing.expect(!ctx.cpu.readFlag(.h));
+    try testing.expect(!ctx.cpu.readFlag(.c));
+}
+
+test "ADC A, E (half carry out)" {
+    var ctx = try TestContext.init();
+    defer ctx.deinit();
+    // OR A (clear C); LD A, 0x0F; LD E, 0x01; ADC A, E
+    const init_mem = [_]u8{ 0xB7, 0x3E, 0x0F, 0x1E, 0x01, 0x8B };
+    run_test(ctx.cpu, &init_mem, 4);
+    try testing.expectEqual(@as(u8, 0x10), ctx.cpu.a);
+    try testing.expect(!ctx.cpu.readFlag(.z));
+    try testing.expect(!ctx.cpu.readFlag(.n));
+    try testing.expect(ctx.cpu.readFlag(.h));
+    try testing.expect(!ctx.cpu.readFlag(.c));
+}
+
+test "ADC A, E (carry out)" {
+    var ctx = try TestContext.init();
+    defer ctx.deinit();
+    // OR A (clear C); LD A, 0x80; LD E, 0x80; ADC A, E
+    const init_mem = [_]u8{ 0xB7, 0x3E, 0x80, 0x1E, 0x80, 0x8B };
+    run_test(ctx.cpu, &init_mem, 4);
+    try testing.expectEqual(@as(u8, 0x00), ctx.cpu.a);
+    try testing.expect(ctx.cpu.readFlag(.z));
+    try testing.expect(!ctx.cpu.readFlag(.n));
+    try testing.expect(!ctx.cpu.readFlag(.h));
+    try testing.expect(ctx.cpu.readFlag(.c));
+}
+
+test "ADC A, n8 (half carry from carry in)" {
+    var ctx = try TestContext.init();
+    defer ctx.deinit();
+    // SCF; LD A, 0x0F; ADC A, 0x00
+    const init_mem = [_]u8{ 0x37, 0x3E, 0x0F, 0xCE, 0x00 };
+    run_test(ctx.cpu, &init_mem, 3);
+    try testing.expectEqual(@as(u8, 0x10), ctx.cpu.a);
+    try testing.expect(ctx.cpu.readFlag(.h));
+    try testing.expect(!ctx.cpu.readFlag(.c));
+}
+
+test "SBC A, E (no carry in, no carry out)" {
+    var ctx = try TestContext.init();
+    defer ctx.deinit();
+    // OR A (clear C); LD A, 0x15; LD E, 0x05; SBC A, E
+    const init_mem = [_]u8{ 0xB7, 0x3E, 0x15, 0x1E, 0x05, 0x9B };
+    run_test(ctx.cpu, &init_mem, 4);
+    try testing.expectEqual(@as(u8, 0x10), ctx.cpu.a);
+    try testing.expect(!ctx.cpu.readFlag(.z));
+    try testing.expect(ctx.cpu.readFlag(.n));
+    try testing.expect(!ctx.cpu.readFlag(.h));
+    try testing.expect(!ctx.cpu.readFlag(.c));
+}
+
+test "SBC A, E (carry in, no carry out)" {
+    var ctx = try TestContext.init();
+    defer ctx.deinit();
+    // SCF; LD A, 0x15; LD E, 0x05; SBC A, E
+    const init_mem = [_]u8{ 0x37, 0x3E, 0x15, 0x1E, 0x05, 0x9B };
+    run_test(ctx.cpu, &init_mem, 4);
+    try testing.expectEqual(@as(u8, 0x0F), ctx.cpu.a);
+    try testing.expect(!ctx.cpu.readFlag(.z));
+    try testing.expect(ctx.cpu.readFlag(.n));
+    try testing.expect(ctx.cpu.readFlag(.h)); // 0x5 - 0x5 - 1 = borrow!
+    try testing.expect(!ctx.cpu.readFlag(.c));
+}
+
+test "SBC A, E (half carry out / borrow)" {
+    var ctx = try TestContext.init();
+    defer ctx.deinit();
+    // OR A (clear C); LD A, 0x10; LD E, 0x01; SBC A, E
+    const init_mem = [_]u8{ 0xB7, 0x3E, 0x10, 0x1E, 0x01, 0x9B };
+    run_test(ctx.cpu, &init_mem, 4);
+    try testing.expectEqual(@as(u8, 0x0F), ctx.cpu.a);
+    try testing.expect(ctx.cpu.readFlag(.n));
+    try testing.expect(ctx.cpu.readFlag(.h));
+    try testing.expect(!ctx.cpu.readFlag(.c));
+}
+
+test "SBC A, E (carry out / borrow)" {
+    var ctx = try TestContext.init();
+    defer ctx.deinit();
+    // OR A (clear C); LD A, 0x00; LD E, 0x01; SBC A, E
+    const init_mem = [_]u8{ 0xB7, 0x3E, 0x00, 0x1E, 0x01, 0x9B };
+    run_test(ctx.cpu, &init_mem, 4);
+    try testing.expectEqual(@as(u8, 0xFF), ctx.cpu.a);
+    try testing.expect(ctx.cpu.readFlag(.n));
+    try testing.expect(ctx.cpu.readFlag(.h));
+    try testing.expect(ctx.cpu.readFlag(.c));
+}
+
 fn run_test(cpu: *Cpu, mem: []const u8, steps: u16) void {
     const start_address = hw.Map.wram0.start;
     var i: u16 = 0;

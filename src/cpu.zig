@@ -101,10 +101,13 @@ fn makeLdHlPtrReg(comptime src: Register) InstructionFn {
 fn makeAdd(comptime src_type: SourceType, comptime reg: ?Register) InstructionFn {
     return struct {
         fn f(cpu: *Cpu) u32 {
-            const old = cpu.a;
+            const a = cpu.a;
             const value = fetchSource(cpu, src_type, reg);
-            cpu.a +%= value;
-            cpu.updateMathFlags(u8, old, value, cpu.a, false);
+            cpu.a = a +% value;
+            cpu.checkFlag(.z, cpu.a == 0);
+            cpu.unsetFlag(.n);
+            cpu.checkFlag(.h, (a & 0x0F) + (value & 0x0F) > 0x0F);
+            cpu.checkFlag(.c, @as(u16, a) + value > 0xFF);
             return if (src_type == .register) 4 else 8;
         }
     }.f;
@@ -113,10 +116,13 @@ fn makeAdd(comptime src_type: SourceType, comptime reg: ?Register) InstructionFn
 fn makeSub(comptime src_type: SourceType, comptime reg: ?Register) InstructionFn {
     return struct {
         fn f(cpu: *Cpu) u32 {
-            const old = cpu.a;
+            const a = cpu.a;
             const value = fetchSource(cpu, src_type, reg);
-            cpu.a -%= value;
-            cpu.updateMathFlags(u8, old, value, cpu.a, true);
+            cpu.a = a -% value;
+            cpu.checkFlag(.z, cpu.a == 0);
+            cpu.setFlag(.n);
+            cpu.checkFlag(.h, (a & 0x0F) < (value & 0x0F));
+            cpu.checkFlag(.c, a < value);
             return if (src_type == .register) 4 else 8;
         }
     }.f;
@@ -226,8 +232,10 @@ fn makeAddHl(comptime src: U16Register) InstructionFn {
             const hl = cpu.getU16Register(.hl);
             const value = cpu.getU16Register(src);
             const result = hl +% value;
-            cpu.updateMathFlags(u16, hl, value, result, false);
             cpu.setU16Register(.hl, result);
+            cpu.unsetFlag(.n);
+            cpu.checkFlag(.h, (hl & 0x0FFF) + (value & 0x0FFF) > 0x0FFF);
+            cpu.checkFlag(.c, @as(u32, hl) + value > 0xFFFF);
             return 8;
         }
     }.f;
@@ -236,11 +244,16 @@ fn makeAddHl(comptime src: U16Register) InstructionFn {
 fn makeAdc(comptime src_type: SourceType, comptime reg: ?Register) InstructionFn {
     return struct {
         fn f(cpu: *Cpu) u32 {
-            const old = cpu.a;
+            const a = cpu.a;
             const carry: u8 = @intFromBool(cpu.readFlag(.c));
             const value = fetchSource(cpu, src_type, reg);
-            cpu.a +%= value +% carry;
-            cpu.updateMathFlags(u8, old, value +% carry, cpu.a, false);
+            const result: u16 = @as(u16, a) +% value +% carry;
+            cpu.a = @truncate(result);
+
+            cpu.checkFlag(.z, cpu.a == 0);
+            cpu.unsetFlag(.n);
+            cpu.checkFlag(.h, (a & 0xF) + (value & 0xF) + carry > 0xF);
+            cpu.checkFlag(.c, result > 0xFF);
             return if (src_type == .register) 4 else 8;
         }
     }.f;
@@ -249,11 +262,16 @@ fn makeAdc(comptime src_type: SourceType, comptime reg: ?Register) InstructionFn
 fn makeSbc(comptime src_type: SourceType, comptime reg: ?Register) InstructionFn {
     return struct {
         fn f(cpu: *Cpu) u32 {
-            const old = cpu.a;
+            const a = cpu.a;
             const carry: u8 = @intFromBool(cpu.readFlag(.c));
             const value = fetchSource(cpu, src_type, reg);
-            cpu.a -%= value +% carry;
-            cpu.updateMathFlags(u8, old, value +% carry, cpu.a, true);
+            const result: u16 = @as(u16, a) -% value -% carry;
+            cpu.a = @truncate(result);
+
+            cpu.checkFlag(.z, cpu.a == 0);
+            cpu.setFlag(.n);
+            cpu.checkFlag(.h, (a & 0x0F) < @as(u16, value & 0x0F) + carry);
+            cpu.checkFlag(.c, result > 0xFF);
             return if (src_type == .register) 4 else 8;
         }
     }.f;
@@ -351,241 +369,162 @@ fn makeRST(comptime opcode: u8) InstructionFn {
     }.f;
 }
 
-fn makeRLC(comptime regName: Register) InstructionFn {
+fn makeRLC(comptime src_type: SourceType, comptime reg_name: ?Register) InstructionFn {
     return struct {
         fn f(cpu: *Cpu) u32 {
-            const reg = cpu.getRegister(regName);
-            const bit7 = (reg.* >> 7) & 1;
-            reg.* = (reg.* << 1) | bit7;
+            const val = fetchSource(cpu, src_type, reg_name);
+            const bit7 = (val >> 7) & 1;
+            const result = (val << 1) | bit7;
 
-            cpu.checkFlag(.z, reg.* == 0);
+            switch (src_type) {
+                .register => cpu.getRegister(reg_name.?).* = result,
+                .hl_ptr => cpu.mmu.write(cpu.getU16Register(.hl), result),
+                .immediate => unreachable,
+            }
+
+            cpu.checkFlag(.z, result == 0);
             cpu.checkFlag(.c, bit7 != 0);
             cpu.unsetFlag(.h);
             cpu.unsetFlag(.n);
-            return 8;
+            return if (src_type == .register) 8 else 16;
         }
     }.f;
 }
 
-fn makeRLC16(comptime regName: U16Register) InstructionFn {
+fn makeRRC(comptime src_type: SourceType, comptime reg_name: ?Register) InstructionFn {
     return struct {
         fn f(cpu: *Cpu) u32 {
-            const reg = cpu.getU16Register(regName);
-            const bit15 = (reg >> 15) & 1;
-            const result = (reg << 1) | bit15;
-            cpu.setU16Register(regName, result);
+            const val = fetchSource(cpu, src_type, reg_name);
+            const bit0 = val & 1;
+            const result = (val >> 1) | (bit0 << 7);
 
-            cpu.checkFlag(.z, result == 0);
-            cpu.checkFlag(.c, bit15 != 0);
-            cpu.unsetFlag(.h);
-            cpu.unsetFlag(.n);
-            return 16;
-        }
-    }.f;
-}
-
-fn makeRRC(comptime regName: Register) InstructionFn {
-    return struct {
-        fn f(cpu: *Cpu) u32 {
-            const reg = cpu.getRegister(regName);
-            const bit0 = reg.* & 1;
-            reg.* = (reg.* >> 1) | (bit0 << 7);
-
-            cpu.checkFlag(.z, reg.* == 0);
-            cpu.checkFlag(.c, bit0 != 0);
-            cpu.unsetFlag(.h);
-            cpu.unsetFlag(.n);
-            return 8;
-        }
-    }.f;
-}
-
-fn makeRRC16(comptime regName: U16Register) InstructionFn {
-    return struct {
-        fn f(cpu: *Cpu) u32 {
-            const reg = cpu.getU16Register(regName);
-            const bit0 = reg & 1;
-            const result = (reg >> 1) | (bit0 << 15);
-            cpu.setU16Register(regName, result);
+            switch (src_type) {
+                .register => cpu.getRegister(reg_name.?).* = result,
+                .hl_ptr => cpu.mmu.write(cpu.getU16Register(.hl), result),
+                .immediate => unreachable,
+            }
 
             cpu.checkFlag(.z, result == 0);
             cpu.checkFlag(.c, bit0 != 0);
             cpu.unsetFlag(.h);
             cpu.unsetFlag(.n);
-            return 16;
+            return if (src_type == .register) 8 else 16;
         }
     }.f;
 }
 
-fn makeRR(comptime regName: Register) InstructionFn {
+fn makeRR(comptime src_type: SourceType, comptime reg_name: ?Register) InstructionFn {
     return struct {
         fn f(cpu: *Cpu) u32 {
-            const reg = cpu.getRegister(regName);
-            const bit0 = reg.* & 1;
+            const val = fetchSource(cpu, src_type, reg_name);
+            const bit0 = val & 1;
             const c_flag = cpu.readFlag(.c);
-            reg.* >>= 1;
-            reg.* |= @as(u8, @intFromBool(c_flag)) << 7;
+            const result = (val >> 1) | (@as(u8, @intFromBool(c_flag)) << 7);
+
+            switch (src_type) {
+                .register => cpu.getRegister(reg_name.?).* = result,
+                .hl_ptr => cpu.mmu.write(cpu.getU16Register(.hl), result),
+                .immediate => unreachable,
+            }
 
             cpu.checkFlag(.c, bit0 != 0);
-            cpu.checkFlag(.z, reg.* == 0);
+            cpu.checkFlag(.z, result == 0);
             cpu.unsetFlag(.h);
             cpu.unsetFlag(.n);
-            return 8;
+            return if (src_type == .register) 8 else 16;
         }
     }.f;
 }
+}
 
-fn makeRL(comptime regName: Register) InstructionFn {
+fn makeRL(comptime src_type: SourceType, comptime reg_name: ?Register) InstructionFn {
     return struct {
         fn f(cpu: *Cpu) u32 {
-            const reg = cpu.getRegister(regName);
-            const bit7 = (reg.* >> 7) & 1;
+            const val = fetchSource(cpu, src_type, reg_name);
+            const bit7 = (val >> 7) & 1;
             const c_flag = cpu.readFlag(.c);
-            reg.* <<= 1;
-            reg.* |= @intFromBool(c_flag);
+            const result = (val << 1) | @intFromBool(c_flag);
+
+            switch (src_type) {
+                .register => cpu.getRegister(reg_name.?).* = result,
+                .hl_ptr => cpu.mmu.write(cpu.getU16Register(.hl), result),
+                .immediate => unreachable,
+            }
 
             cpu.checkFlag(.c, bit7 != 0);
-            cpu.checkFlag(.z, reg.* == 0);
-            cpu.unsetFlag(.h);
-            cpu.unsetFlag(.n);
-            return 8;
-        }
-    }.f;
-}
-
-fn makeRL16(comptime regName: U16Register) InstructionFn {
-    return struct {
-        fn f(cpu: *Cpu) u32 {
-            const reg = cpu.getU16Register(regName);
-            const bit15 = (reg >> 15) & 1;
-            const c_flag = cpu.readFlag(.c);
-            const result = (reg << 1) | @intFromBool(c_flag);
-            cpu.setU16Register(regName, result);
-
-            cpu.checkFlag(.c, bit15 != 0);
             cpu.checkFlag(.z, result == 0);
             cpu.unsetFlag(.h);
             cpu.unsetFlag(.n);
-            return 16;
+            return if (src_type == .register) 8 else 16;
         }
     }.f;
 }
 
-fn makeRR16(comptime regName: U16Register) InstructionFn {
+fn makeBIT(comptime bit_num: u3, comptime src_type: SourceType, comptime reg: ?Register) InstructionFn {
+
+fn makeSLA(comptime src_type: SourceType, comptime reg_name: ?Register) InstructionFn {
     return struct {
         fn f(cpu: *Cpu) u32 {
-            const reg = cpu.getU16Register(regName);
-            const bit0 = reg & 1;
-            const c_flag = cpu.readFlag(.c);
-            const result = (reg >> 1) | (@as(u16, @intFromBool(c_flag)) << 15);
-            cpu.setU16Register(regName, result);
+            const val = fetchSource(cpu, src_type, reg_name);
+            const bit7 = (val >> 7) & 1;
+            const result = val << 1;
 
-            cpu.checkFlag(.c, bit0 != 0);
-            cpu.checkFlag(.z, result == 0);
-            cpu.unsetFlag(.h);
-            cpu.unsetFlag(.n);
-            return 16;
-        }
-    }.f;
-}
-
-fn makeSLA(comptime regName: Register) InstructionFn {
-    return struct {
-        fn f(cpu: *Cpu) u32 {
-            const reg = cpu.getRegister(regName);
-            const bit7 = (reg.* >> 7) & 1;
-            reg.* <<= 1;
+            switch (src_type) {
+                .register => cpu.getRegister(reg_name.?).* = result,
+                .hl_ptr => cpu.mmu.write(cpu.getU16Register(.hl), result),
+                .immediate => unreachable,
+            }
 
             cpu.checkFlag(.c, bit7 != 0);
-            cpu.checkFlag(.z, reg.* == 0);
+            cpu.checkFlag(.z, result == 0);
             cpu.unsetFlag(.h);
             cpu.unsetFlag(.n);
-            return 8;
+            return if (src_type == .register) 8 else 16;
         }
     }.f;
 }
 
-fn makeSRA(comptime regName: Register) InstructionFn {
+fn makeSRA(comptime src_type: SourceType, comptime reg_name: ?Register) InstructionFn {
     return struct {
         fn f(cpu: *Cpu) u32 {
-            const reg = cpu.getRegister(regName);
-            const bit0 = reg.* & 1;
-            const bit7 = reg.* & 0x80;
-            reg.* = (reg.* >> 1) | bit7;
+            const val = fetchSource(cpu, src_type, reg_name);
+            const bit0 = val & 1;
+            const bit7 = val & 0x80;
+            const result = (val >> 1) | bit7;
 
-            cpu.checkFlag(.c, bit0 != 0);
-            cpu.checkFlag(.z, reg.* == 0);
-            cpu.unsetFlag(.h);
-            cpu.unsetFlag(.n);
-            return 8;
-        }
-    }.f;
-}
-
-fn makeSRL(comptime regName: Register) InstructionFn {
-    return struct {
-        fn f(cpu: *Cpu) u32 {
-            const reg = cpu.getRegister(regName);
-            const bit0 = reg.* & 1;
-            reg.* >>= 1;
-
-            cpu.checkFlag(.c, bit0 != 0);
-            cpu.checkFlag(.z, reg.* == 0);
-            cpu.unsetFlag(.h);
-            cpu.unsetFlag(.n);
-            return 8;
-        }
-    }.f;
-}
-
-fn makeSRL16(comptime regName: U16Register) InstructionFn {
-    return struct {
-        fn f(cpu: *Cpu) u32 {
-            const reg = cpu.getU16Register(regName);
-            const bit0 = reg & 1;
-            const result = reg >> 1;
-            cpu.setU16Register(regName, result);
+            switch (src_type) {
+                .register => cpu.getRegister(reg_name.?).* = result,
+                .hl_ptr => cpu.mmu.write(cpu.getU16Register(.hl), result),
+                .immediate => unreachable,
+            }
 
             cpu.checkFlag(.c, bit0 != 0);
             cpu.checkFlag(.z, result == 0);
             cpu.unsetFlag(.h);
             cpu.unsetFlag(.n);
-            return 16;
+            return if (src_type == .register) 8 else 16;
         }
     }.f;
 }
 
-fn makeSLA16(comptime regName: U16Register) InstructionFn {
+fn makeSRL(comptime src_type: SourceType, comptime reg_name: ?Register) InstructionFn {
     return struct {
         fn f(cpu: *Cpu) u32 {
-            const reg = cpu.getU16Register(regName);
-            const bit15 = (reg >> 15) & 1;
-            const result = reg << 1;
-            cpu.setU16Register(regName, result);
+            const val = fetchSource(cpu, src_type, reg_name);
+            const bit0 = val & 1;
+            const result = val >> 1;
 
-            cpu.checkFlag(.c, bit15 != 0);
-            cpu.checkFlag(.z, result == 0);
-            cpu.unsetFlag(.h);
-            cpu.unsetFlag(.n);
-            return 16;
-        }
-    }.f;
-}
-
-fn makeSRA16(comptime regName: U16Register) InstructionFn {
-    return struct {
-        fn f(cpu: *Cpu) u32 {
-            const reg = cpu.getU16Register(regName);
-            const bit0 = reg & 1;
-            const bit15 = reg & 0x8000;
-            const result = (reg >> 1) | bit15;
-            cpu.setU16Register(regName, result);
+            switch (src_type) {
+                .register => cpu.getRegister(reg_name.?).* = result,
+                .hl_ptr => cpu.mmu.write(cpu.getU16Register(.hl), result),
+                .immediate => unreachable,
+            }
 
             cpu.checkFlag(.c, bit0 != 0);
             cpu.checkFlag(.z, result == 0);
             cpu.unsetFlag(.h);
             cpu.unsetFlag(.n);
-            return 16;
+            return if (src_type == .register) 8 else 16;
         }
     }.f;
 }
@@ -845,8 +784,8 @@ const cb_instruction_table = blk: {
         const reg = getReg(i);
         const src_type: SourceType = if (reg == null) .hl_ptr else .register;
 
-        table[0x00 + i] = if (reg) |r| makeRLC(r) else makeRLC16(.hl);
-        table[0x08 + i] = if (reg) |r| makeRRC(r) else makeRRC16(.hl);
+        table[0x00 + i] = if (reg) |r| makeRLC(r) else Cpu.rlc_hl;
+        table[0x08 + i] = if (reg) |r| makeRRC(r) else Cpu.rrc_hl;
         table[0x10 + i] = if (reg) |r| makeRL(r) else makeRL16(.hl);
         table[0x18 + i] = if (reg) |r| makeRR(r) else makeRR16(.hl);
         table[0x20 + i] = if (reg) |r| makeSLA(r) else makeSLA16(.hl);
@@ -1287,6 +1226,32 @@ pub const Cpu = struct {
         return 16;
     }
 
+    fn rlc_hl(self: *Cpu) u32 {
+        const address = self.getU16Register(.hl);
+        const value = self.mmu.read(address, u8);
+        const bit7 = (value >> 7) & 1;
+        const result = (value << 1) | bit7;
+
+        self.checkFlag(.z, result == 0);
+        self.unsetFlag(.n);
+        self.unsetFlag(.h);
+        self.checkFlag(.c, bit7 == 1);
+        return 16;
+    }
+
+    fn rrc_hl(self: *Cpu) u32 {
+        const address = self.getU16Register(.hl);
+        const value = self.mmu.read(address, u8);
+        const bit0 = value & 1;
+        const result = (value >> 1) | (bit0 << 7);
+
+        self.checkFlag(.z, result == 0);
+        self.unsetFlag(.n);
+        self.unsetFlag(.h);
+        self.checkFlag(.c, bit0 == 1);
+        return 16;
+    }
+
     fn unknown_opcode(self: *Cpu) u32 {
         _ = self;
         @panic("Unknown opcode");
@@ -1333,7 +1298,7 @@ pub const Cpu = struct {
             },
             .af => {
                 self.a = @truncate(val >> 8);
-                self.f = @truncate(val);
+                self.f = @as(u8, @truncate(val)) & 0xF0;
             },
             .sp => self.sp = val,
             .pc => self.pc = val,
@@ -1377,31 +1342,6 @@ pub const Cpu = struct {
             self.checkFlag(.h, (old & 0x0F) == 0);
         } else {
             self.checkFlag(.h, (old & 0x0F) + 1 > 0x0F);
-        }
-    }
-
-    fn updateMathFlags(self: *Cpu, comptime T: type, a: T, b: T, result: T, comptime is_subtract: bool) void {
-        self.checkFlag(.z, result == 0);
-        self.checkFlag(.n, is_subtract);
-
-        if (T == u8) {
-            if (is_subtract) {
-                self.checkFlag(.h, (a & 0x0F) < (b & 0x0F));
-                self.checkFlag(.c, a < b);
-            } else {
-                self.checkFlag(.h, (a & 0x0F) + (b & 0x0F) > 0x0F);
-                self.checkFlag(.c, result < a);
-            }
-        } else if (T == u16) {
-            if (is_subtract) {
-                self.checkFlag(.h, (a & 0x0FFF) < (b & 0x0FFF));
-                self.checkFlag(.c, a < b);
-            } else {
-                self.checkFlag(.h, (a & 0x0FFF) + (b & 0x0FFF) > 0x0FFF);
-                self.checkFlag(.c, result < a);
-            }
-        } else {
-            unreachable;
         }
     }
 
