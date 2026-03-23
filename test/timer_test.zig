@@ -2,9 +2,10 @@ const std = @import("std");
 const testing = std.testing;
 const Timer = @import("timer").Timer;
 const Interrupts = @import("interrupts").Interrupts;
+const Sdt = @import("sdt").Sdt;
 const hw = @import("hw");
 
-fn setup() !struct { arena: std.heap.ArenaAllocator, timer: *Timer, interrupts: *Interrupts } {
+fn setup() !struct { arena: std.heap.ArenaAllocator, timer: *Timer, interrupts: *Interrupts, sdt: *Sdt } {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     errdefer arena.deinit();
     const aa = arena.allocator();
@@ -15,12 +16,23 @@ fn setup() !struct { arena: std.heap.ArenaAllocator, timer: *Timer, interrupts: 
         .ifr = 0,
     };
 
+    const sdt = try aa.create(Sdt);
+    sdt.* = .{};
+
     const timer = try aa.create(Timer);
     timer.* = .{
         .interrupts = interrupts,
+        .sdt = sdt,
     };
 
-    return .{ .arena = arena, .timer = timer, .interrupts = interrupts };
+    return .{ .arena = arena, .timer = timer, .interrupts = interrupts, .sdt = sdt };
+}
+
+fn tick(timer: *Timer, cycles: usize) void {
+    var i: usize = 0;
+    while (i < cycles) : (i += 4) {
+        timer.tick();
+    }
 }
 
 test "DIV resets internal counter and register" {
@@ -28,7 +40,7 @@ test "DIV resets internal counter and register" {
     defer ctx.arena.deinit();
 
     // Tick it for a bit
-    ctx.timer.tick(256 * 4); // 256 M-cycles = 1024 T-cycles
+    tick(ctx.timer, 256 * 4); // 256 M-cycles = 1024 T-cycles
     try testing.expect(ctx.timer.readDiv() > 0);
 
     // Write to DIV should reset it
@@ -56,7 +68,7 @@ test "TIMA falling edge bug: resetting DIV" {
 
     // Tick until bit 9 of internal counter is 1
     // Bit 9 flips every 512 T-cycles (128 M-cycles)
-    ctx.timer.tick(512);
+    tick(ctx.timer, 512);
     try testing.expectEqual(@as(u16, 512), ctx.timer.counter);
     try testing.expectEqual(@as(u1, 1), @as(u1, @truncate(ctx.timer.counter >> 9)));
 
@@ -74,7 +86,7 @@ test "TIMA falling edge bug: disabling TAC" {
     ctx.timer.writeTima(0);
 
     // Tick until watched bit (bit 9) is 1
-    ctx.timer.tick(512);
+    tick(ctx.timer, 512);
     try testing.expectEqual(@as(u1, 1), @as(u1, @truncate(ctx.timer.counter >> 9)));
 
     // Disabling timer should trigger falling edge if bit was 1
@@ -87,7 +99,7 @@ test "TIMA increment" {
     defer ctx.arena.deinit();
 
     ctx.timer.writeTac(0x04);
-    ctx.timer.tick(1024);
+    tick(ctx.timer, 1024);
 
     try testing.expectEqual(@as(u8, 1), ctx.timer.readTima());
 }
@@ -104,14 +116,14 @@ test "TIMA overflow and TMA reload delay" {
     // In 4096Hz mode, it ticks every 1024 T-cycles (256 M-cycles)
     // But we can manually tick the hardware or just wait.
     // Let's tick enough to cause the increment.
-    ctx.timer.tick(1024);
+    tick(ctx.timer, 1024);
 
     // After overflow, TIMA should be 0 for 1 machine cycle (4 T-cycles)
     try testing.expectEqual(@as(u8, 0), ctx.timer.readTima());
     try testing.expect(ctx.timer.pending_interrupt);
 
     // Tick one more M-cycle to complete the reload
-    ctx.timer.tick(4);
+    tick(ctx.timer, 4);
     try testing.expectEqual(@as(u8, 0x55), ctx.timer.readTima());
     try testing.expect(ctx.interrupts.isPending(.timer));
 }

@@ -27,9 +27,7 @@ pub const Sdt = struct {
         self.sb = value;
     }
 
-    pub fn tick(self: *Sdt, cycles: u32) void {
+    pub fn tick(self: *Sdt) void {
         if (self.sc.clock_select == 0 or self.sc.enable == 0) return;
-
-        _ = cycles;
     }
 };

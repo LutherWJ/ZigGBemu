@@ -2,6 +2,7 @@ const std = @import("std");
 const hw = @import("hw");
 const interrupts = @import("interrupts");
 const Interrupts = interrupts.Interrupts;
+const Sdt = @import("sdt").Sdt;
 
 const TimerControl = packed struct(u8) {
     clock_select: u2 = 0,
@@ -16,6 +17,7 @@ pub const Timer = struct {
     tac: TimerControl = .{},
     pending_interrupt: bool = false, // Interupt is delayed one machine cycle
     interrupts: *Interrupts,
+    sdt: *Sdt,
 
     pub fn writeDiv(self: *Timer) void {
         const watched_bit = self.getWatchedBit();
@@ -73,19 +75,6 @@ pub const Timer = struct {
         return @as(u8, @bitCast(self.tac)) | 0b11111000;
     }
 
-    // Takes T-cycles as an argument
-    pub fn tick(self: *Timer, cycles: u32) void {
-        // Function heavily assumes that cycles will always be a multiple of 4.
-        std.debug.assert(cycles % hw.Timings.tCyclesPerMCycle == 0);
-
-        var cycles_left = cycles;
-
-        // Extract T cycles into machine cycles
-        while (cycles_left > 0) : (cycles_left -= hw.Timings.tCyclesPerMCycle) {
-            self.tickTimerHardware();
-        }
-    }
-
     fn getWatchedBit(self: *const Timer) u4 {
         return switch (self.tac.clock_select) {
             0b00 => 9,
@@ -96,7 +85,8 @@ pub const Timer = struct {
     }
 
     // Ticks the counter one machine cycle
-    fn tickTimerHardware(self: *Timer) void {
+    // Automatically ticks all other timer dependent systems
+    pub fn tick(self: *Timer) void {
         if (self.pending_interrupt) {
             self.tima = self.tma;
             self.interrupts.request(.timer);
@@ -113,6 +103,8 @@ pub const Timer = struct {
         if (self.tac.enable == 1 and before == 1 and after == 0) {
             self.incrementTimer();
         }
+
+        self.sdt.tick();
     }
 
     fn incrementTimer(self: *Timer) void {

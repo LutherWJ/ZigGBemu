@@ -7,6 +7,7 @@ const hw = @import("hw");
 const interrupts = @import("interrupts");
 const Interrupts = interrupts.Interrupts;
 const InterruptBit = interrupts.InterruptBit;
+const Timer = @import("timer").Timer;
 
 pub const Mmu = struct {
     vram: [hw.Map.vram.size]u8 = [_]u8{0} ** hw.Map.vram.size,
@@ -15,6 +16,7 @@ pub const Mmu = struct {
     hram: [hw.Map.hram.size]u8 = [_]u8{0} ** hw.Map.hram.size,
     oam: [hw.Map.oam.size]u8 = [_]u8{0} ** hw.Map.oam.size,
     interrupts: *Interrupts,
+    timer: *Timer,
     io: *Io,
     mbc: *Mbc,
 
@@ -30,6 +32,7 @@ pub const Mmu = struct {
         const T = @TypeOf(value);
         if (T == u8 or T == comptime_int) {
             const val: u8 = @truncate(value);
+            self.timer.tick();
             switch (address) {
                 hw.Map.rom0.start...hw.Map.romx.end => self.mbc.write(address, val),
                 hw.Map.vram.start...hw.Map.vram.end => self.vram[address - hw.Map.vram.start] = val,
@@ -50,6 +53,21 @@ pub const Mmu = struct {
             self.write(address + 1, @as(u8, @truncate(value >> 8)));
         } else {
             @compileError("Memory.write only supports u8, 16 and comptime_int");
+        }
+    }
+
+    /// Used to initialize memory at boot time without ticking the timer
+    /// Only supports memory regions written to at boot time.
+    pub fn bootWrite(self: *Mmu, address: u16, value: u8) void {
+        switch (address) {
+            hw.Map.vram.start...hw.Map.vram.end => self.vram[address - hw.Map.vram.start] = value,
+            hw.Map.wram0.start...hw.Map.wram0.end => self.wram0[address - hw.Map.wram0.start] = value,
+            hw.Map.wramx.start...hw.Map.wramx.end => self.wram1[address - hw.Map.wramx.start] = value,
+            hw.Map.oam.start...hw.Map.oam.end => self.oam[address - hw.Map.oam.start] = value,
+            hw.Map.io.start...hw.Map.io.end => self.io.write(address, value),
+            hw.Map.hram.start...hw.Map.hram.end => self.hram[address - hw.Map.hram.start] = value,
+            hw.Map.ie_reg => self.interrupts.ie = value,
+            else => unreachable,
         }
     }
 
@@ -83,6 +101,7 @@ pub const Mmu = struct {
     }
 
     fn readU8(self: *const Mmu, address: u16) u8 {
+        self.timer.tick();
         return switch (address) {
             hw.Map.rom0.start...hw.Map.romx.end => self.mbc.read(address),
             hw.Map.vram.start...hw.Map.vram.end => self.vram[address - hw.Map.vram.start],

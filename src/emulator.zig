@@ -33,14 +33,14 @@ pub const Emulator = struct {
         emu.interrupts = try aa.create(Interrupts);
         emu.interrupts.* = .{};
 
+        emu.sdt = try aa.create(Sdt);
+        emu.sdt.* = .{};
+
         emu.timer = try aa.create(Timer);
-        emu.timer.* = .{ .interrupts = emu.interrupts };
+        emu.timer.* = .{ .interrupts = emu.interrupts, .sdt = emu.sdt };
 
         emu.joypad = try aa.create(Joypad);
         emu.joypad.* = .{};
-
-        emu.sdt = try aa.create(Sdt);
-        emu.sdt.* = .{};
 
         emu.io = try aa.create(Io);
         emu.io.* = .{
@@ -56,6 +56,7 @@ pub const Emulator = struct {
         emu.mmu = try aa.create(Mmu);
         emu.mmu.* = .{
             .interrupts = emu.interrupts,
+            .timer = emu.timer,
             .io = emu.io,
             .mbc = emu.mbc,
         };
@@ -71,10 +72,10 @@ pub const Emulator = struct {
 
         return emu;
     }
+
     pub fn runFrame(self: *Emulator) void {
-        var cycles: u32 = 0;
-        while (cycles < hw.Timings.cyclesPerFrame) {
-            cycles += self.cpu.step();
+        while (true) {
+            self.cpu.step();
         }
     }
 

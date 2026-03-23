@@ -26,7 +26,7 @@ const TestContext = struct {
         sdt.* = .{};
 
         const timer = try aa.create(Timer);
-        timer.* = .{ .interrupts = interrupts };
+        timer.* = .{ .interrupts = interrupts, .sdt = sdt };
 
         const joypad = try aa.create(Joypad);
         joypad.* = .{};
@@ -48,6 +48,7 @@ const TestContext = struct {
         const mmu = try aa.create(Mmu);
         mmu.* = .{
             .interrupts = interrupts,
+            .timer = timer,
             .io = io,
             .mbc = mbc,
         };

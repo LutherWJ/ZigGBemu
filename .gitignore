@@ -3,5 +3,7 @@ zig-out/
 .zig-cache/
 devtools/
 zig-out/
+gb-test-roms/
 ZigGBemu.iml
 CLAUDE.md
+
