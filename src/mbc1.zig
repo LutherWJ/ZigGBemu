@@ -46,7 +46,7 @@ pub const Mbc1 = struct {
         }
     }
 
-    // TODO: code is probably fine but look it over again for more optimizations.
+    // TODO: code is fine but can be optimized
     fn readUpper(self: *const Mbc1, address: u16) u8 {
         // Reads from the adjustable bank region cannot read from bank 0
         var selected_bank: u8 = (@as(u8, self.secondary_bank_register) << 5) | self.bank_register;

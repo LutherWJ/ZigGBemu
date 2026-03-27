@@ -13,6 +13,7 @@ pub const Interrupts = struct {
     ifr: u8 = 0,
 
     pub fn request(self: *Interrupts, interrupt: InterruptBit) void {
+        // std.debug.print("[INT] Request: {s}\n", .{@tagName(interrupt)});
         self.ifr |= (@as(u8, 1) << @intFromEnum(interrupt));
     }
 

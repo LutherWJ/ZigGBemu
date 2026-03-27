@@ -23,7 +23,7 @@ const TestContext = struct {
         interrupts.* = .{};
 
         const sdt = try aa.create(Sdt);
-        sdt.* = .{};
+        sdt.* = .{ .interrupts = interrupts };
 
         const timer = try aa.create(Timer);
         timer.* = .{ .interrupts = interrupts, .sdt = sdt };

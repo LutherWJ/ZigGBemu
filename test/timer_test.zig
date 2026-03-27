@@ -17,7 +17,7 @@ fn setup() !struct { arena: std.heap.ArenaAllocator, timer: *Timer, interrupts: 
     };
 
     const sdt = try aa.create(Sdt);
-    sdt.* = .{};
+    sdt.* = .{ .interrupts = interrupts };
 
     const timer = try aa.create(Timer);
     timer.* = .{

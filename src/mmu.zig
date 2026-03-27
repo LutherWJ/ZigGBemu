@@ -76,30 +76,6 @@ pub const Mmu = struct {
         return (joypad & 0x0F) != 0x0F;
     }
 
-    pub fn enableInterrupt(self: *Mmu, comptime interrupt: InterruptBit) void {
-        self.interrupts.ie |= (@as(u8, 1) << @intFromEnum(interrupt));
-    }
-
-    pub fn clearInterrupt(self: *Mmu, comptime interrupt: InterruptBit) void {
-        self.interrupts.ie &= ~(@as(u8, 1) << @intFromEnum(interrupt));
-    }
-
-    pub fn requestInterrupt(self: *Mmu, comptime interrupt: InterruptBit) void {
-        self.interrupts.request(interrupt);
-    }
-
-    pub fn acknowledgeInterrupt(self: *Mmu, interrupt: InterruptBit) void {
-        self.interrupts.acknowledge(interrupt);
-    }
-
-    pub fn checkInterrupt(self: *const Mmu, comptime interrupt: InterruptBit) bool {
-        return (self.interrupts.ie >> @intFromEnum(interrupt) & 1) == 1;
-    }
-
-    pub fn getPendingInterrupt(self: *const Mmu) ?InterruptBit {
-        return self.interrupts.getPending();
-    }
-
     fn readU8(self: *const Mmu, address: u16) u8 {
         self.timer.tick();
         return switch (address) {

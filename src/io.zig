@@ -39,7 +39,7 @@ pub const Io = struct {
             hw.Io.tma => self.timer.writeTma(value),
             hw.Io.tac => self.timer.writeTac(value),
             hw.Io.if_reg => self.interrupts.ifr = value,
-            else => {}, //std.debug.print("Attempted writing to unimplemented IO region at address: 0x{X}\n", .{address}),
+            else => std.debug.print("[IO] Write to unimplemented address: 0x{X:0>4} = 0x{X:0>2}\n", .{address, value}),
         }
     }
 };

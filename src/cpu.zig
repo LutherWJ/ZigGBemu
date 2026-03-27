@@ -1,16 +1,12 @@
-// CURRENT TODO: Refactoring timing, this is a big refactor so touch NOTHING ELSE!!!!!
-// TODO DUMBASS
-// TODO DUMBASS
-// TY :D
 const std = @import("std");
-pub const hw = @import("hw");
-pub const Mmu = @import("mmu").Mmu;
-pub const Mbc = @import("mbc").Mbc;
-pub const interrupts = @import("interrupts");
-pub const Interrupts = interrupts.Interrupts;
-pub const InterruptBit = interrupts.InterruptBit;
-pub const Timer = @import("timer").Timer;
-pub const Sdt = @import("sdt").Sdt;
+const hw = @import("hw");
+const Mmu = @import("mmu").Mmu;
+const Mbc = @import("mbc").Mbc;
+const interrupts = @import("interrupts");
+const Interrupts = interrupts.Interrupts;
+const InterruptBit = interrupts.InterruptBit;
+const Timer = @import("timer").Timer;
+const Sdt = @import("sdt").Sdt;
 
 const InstructionFn = *const fn (*Cpu) void; // Returns the amount of cycles it took to execute
 const Flag = enum(u3) { z = 7, n = 6, h = 5, c = 4 };
@@ -798,8 +794,8 @@ pub const Cpu = struct {
             self.halted = false;
             if (self.ime_state == .enabled) {
                 self.handleInterrupt(interrupt);
-                return;
             }
+            return;
         }
 
         if (self.ime_state == .enable_pending) self.ime_state = .enabled;
@@ -823,7 +819,7 @@ pub const Cpu = struct {
 
     // Fast boot implementation. Initializes memory to the post boot state and does nothing more.
     pub fn boot(self: *Cpu) void {
-        self.a = 0x11;
+        self.a = 0x01;
         self.f = 0xB0;
         self.c = 0x13;
         self.e = 0xD8;
@@ -866,6 +862,7 @@ pub const Cpu = struct {
     }
 
     fn handleInterrupt(self: *Cpu, interrupt: InterruptBit) void {
+        // std.debug.print("[INT] Servicing {s} from PC: 0x{X:0>4}\n", .{@tagName(interrupt), self.pc});
         self.ime_state = .disabled;
         self.halted = false;
         self.interrupts.acknowledge(interrupt);

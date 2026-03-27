@@ -7,10 +7,12 @@ const Joypad = @import("joypad").Joypad;
 const Io = @import("io").Io;
 const Interrupts = @import("interrupts").Interrupts;
 const Sdt = @import("sdt").Sdt;
+const Ppu = @import("ppu").Ppu;
 const hw = @import("hw");
 
 pub const Emulator = struct {
     _arena: std.heap.ArenaAllocator,
+    _frame_sync: u8 = 0, // Holds how many cycles we overshot cyclesPerFrame by
     interrupts: *Interrupts,
     timer: *Timer,
     joypad: *Joypad,
@@ -19,6 +21,7 @@ pub const Emulator = struct {
     mmu: *Mmu,
     mbc: *Mbc,
     cpu: *Cpu,
+    ppu: *Ppu,
 
     pub fn init(allocator: std.mem.Allocator, rom_buf: []const u8) !*Emulator {
         var arena = std.heap.ArenaAllocator.init(allocator);
@@ -34,7 +37,7 @@ pub const Emulator = struct {
         emu.interrupts.* = .{};
 
         emu.sdt = try aa.create(Sdt);
-        emu.sdt.* = .{};
+        emu.sdt.* = .{ .interrupts = emu.interrupts };
 
         emu.timer = try aa.create(Timer);
         emu.timer.* = .{ .interrupts = emu.interrupts, .sdt = emu.sdt };
@@ -70,13 +73,21 @@ pub const Emulator = struct {
         };
         emu.cpu.boot();
 
+        emu.ppu = try aa.create(Ppu);
+        emu.ppu.init(emu.interrupts);
+
         return emu;
     }
 
     pub fn runFrame(self: *Emulator) void {
-        while (true) {
+        const starting_cycles: u32 = @as(u32, self.timer.counter);
+        var cycles = 0;
+        while (cycles < hw.Timings.cyclesPerFrame - self._frame_sync) {
             self.cpu.step();
+            cycles = self.timer.counter -% starting_cycles;
         }
+
+        self._frame_sync = cycles - hw.Timings.cyclesPerFrame;
     }
 
     pub fn deinit(self: *Emulator) void {

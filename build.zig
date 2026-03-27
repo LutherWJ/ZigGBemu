@@ -19,6 +19,7 @@ pub fn build(b: *std.Build) void {
         .{ .name = "timer", .path = "src/timer.zig" },
         .{ .name = "interrupts", .path = "src/interrupts.zig" },
         .{ .name = "sdt", .path = "src/sdt.zig" },
+        .{ .name = "ppu", .path = "src/ppu.zig" },
         .{ .name = "emulator", .path = "src/emulator.zig" },
     };
 
@@ -83,4 +84,29 @@ pub fn build(b: *std.Build) void {
         const run_unit_test = b.addRunArtifact(unit_test);
         test_step.dependOn(&run_unit_test.step);
     }
+
+    // 5. WASM Build
+    const wasm_step = b.step("wasm", "Build the WASM binary for the web");
+    const wasm = b.addExecutable(.{
+        .name = "ziggbemu",
+        .root_source_file = b.path("src/ffi.zig"),
+        .target = b.resolveTargetQuery(.{
+            .cpu_arch = .wasm32,
+            .os_tag = .freestanding,
+        }),
+        .optimize = optimize,
+    });
+
+    // This ensures all exported functions in ffi.zig are visible to JavaScript
+    wasm.rdynamic = true;
+    wasm.entry = .disabled;
+
+    for (internal_modules) |m| {
+        wasm.root_module.addImport(m.name, m.mod);
+    }
+
+    // This copies the compiled wasm from the zig-cache directly into your web/ folder
+    const copy_wasm = b.addUpdateSourceFiles();
+    copy_wasm.addCopyFileToSource(wasm.getEmittedBin(), "web/ziggbemu.wasm");
+    wasm_step.dependOn(&copy_wasm.step);
 }
