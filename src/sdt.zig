@@ -38,7 +38,7 @@ pub const Sdt = struct {
             if (self.cycles_left > 0) {
                 self.cycles_left -= 1;
                 if (self.cycles_left == 0) {
-                    self.fifo.writeItem(self.sb) catch {};
+                    // self.fifo.writeItem(self.sb) catch {};
                     std.debug.print("{c}", .{self.sb});
                     self.sc.enable = 0;
                     self.interrupts.request(.serial);

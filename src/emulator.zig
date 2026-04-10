@@ -12,7 +12,7 @@ const hw = @import("hw");
 
 pub const Emulator = struct {
     _arena: std.heap.ArenaAllocator,
-    _frame_sync: u8 = 0, // Holds how many cycles we overshot cyclesPerFrame by
+    _frame_sync: u32 = 0, // Holds how many cycles we overshot cyclesPerFrame by
     interrupts: *Interrupts,
     timer: *Timer,
     joypad: *Joypad,
@@ -39,8 +39,11 @@ pub const Emulator = struct {
         emu.sdt = try aa.create(Sdt);
         emu.sdt.* = .{ .interrupts = emu.interrupts };
 
+        emu.ppu = try aa.create(Ppu);
+        emu.ppu.init(emu.interrupts);
+
         emu.timer = try aa.create(Timer);
-        emu.timer.* = .{ .interrupts = emu.interrupts, .sdt = emu.sdt };
+        emu.timer.* = .{ .interrupts = emu.interrupts, .sdt = emu.sdt, .ppu = emu.ppu };
 
         emu.joypad = try aa.create(Joypad);
         emu.joypad.* = .{};
@@ -51,6 +54,7 @@ pub const Emulator = struct {
             .joypad = emu.joypad,
             .interrupts = emu.interrupts,
             .sdt = emu.sdt,
+            .ppu = emu.ppu,
         };
 
         emu.mbc = try aa.create(Mbc);
@@ -62,6 +66,7 @@ pub const Emulator = struct {
             .timer = emu.timer,
             .io = emu.io,
             .mbc = emu.mbc,
+            .ppu = emu.ppu,
         };
 
         emu.cpu = try aa.create(Cpu);
@@ -73,21 +78,19 @@ pub const Emulator = struct {
         };
         emu.cpu.boot();
 
-        emu.ppu = try aa.create(Ppu);
-        emu.ppu.init(emu.interrupts);
-
         return emu;
     }
 
     pub fn runFrame(self: *Emulator) void {
-        const starting_cycles: u32 = @as(u32, self.timer.counter);
-        var cycles = 0;
-        while (cycles < hw.Timings.cyclesPerFrame - self._frame_sync) {
+        const starting_cycles: u16 = self.timer.counter;
+        var cycles: u32 = 0;
+        const target: u32 = hw.Timings.cyclesPerFrame - self._frame_sync;
+        while (cycles < target) {
             self.cpu.step();
             cycles = self.timer.counter -% starting_cycles;
         }
 
-        self._frame_sync = cycles - hw.Timings.cyclesPerFrame;
+        self._frame_sync = cycles - target;
     }
 
     pub fn deinit(self: *Emulator) void {

@@ -3,6 +3,7 @@ const hw = @import("hw");
 const interrupts = @import("interrupts");
 const Interrupts = interrupts.Interrupts;
 const Sdt = @import("sdt").Sdt;
+const Ppu = @import("ppu").Ppu;
 
 const TimerControl = packed struct(u8) {
     clock_select: u2 = 0,
@@ -18,6 +19,7 @@ pub const Timer = struct {
     pending_interrupt: bool = false, // Interupt is delayed one machine cycle
     interrupts: *Interrupts,
     sdt: *Sdt,
+    ppu: *Ppu,
 
     pub fn writeDiv(self: *Timer) void {
         const watched_bit = self.getWatchedBit();
@@ -105,6 +107,7 @@ pub const Timer = struct {
         }
 
         self.sdt.tick();
+        self.ppu.tick();
     }
 
     fn incrementTimer(self: *Timer) void {

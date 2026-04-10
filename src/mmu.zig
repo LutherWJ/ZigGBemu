@@ -1,6 +1,4 @@
 const std = @import("std");
-const readInt = std.mem.readInt;
-const writeInt = std.mem.writeInt;
 const Mbc = @import("mbc").Mbc;
 const Io = @import("io").Io;
 const hw = @import("hw");
@@ -8,17 +6,17 @@ const interrupts = @import("interrupts");
 const Interrupts = interrupts.Interrupts;
 const InterruptBit = interrupts.InterruptBit;
 const Timer = @import("timer").Timer;
+const Ppu = @import("ppu").Ppu;
 
 pub const Mmu = struct {
-    vram: [hw.Map.vram.size]u8 = [_]u8{0} ** hw.Map.vram.size,
     wram0: [hw.Map.wram0.size]u8 = [_]u8{0} ** hw.Map.wram0.size,
     wram1: [hw.Map.wramx.size]u8 = [_]u8{0} ** hw.Map.wramx.size,
     hram: [hw.Map.hram.size]u8 = [_]u8{0} ** hw.Map.hram.size,
-    oam: [hw.Map.oam.size]u8 = [_]u8{0} ** hw.Map.oam.size,
     interrupts: *Interrupts,
     timer: *Timer,
     io: *Io,
     mbc: *Mbc,
+    ppu: *Ppu,
 
     pub fn read(self: *const Mmu, address: u16, comptime T: type) T {
         return switch (T) {
@@ -35,12 +33,12 @@ pub const Mmu = struct {
             self.timer.tick();
             switch (address) {
                 hw.Map.rom0.start...hw.Map.romx.end => self.mbc.write(address, val),
-                hw.Map.vram.start...hw.Map.vram.end => self.vram[address - hw.Map.vram.start] = val,
+                hw.Map.vram.start...hw.Map.vram.end => self.ppu.vram[address - hw.Map.vram.start] = val,
                 hw.Map.ext_ram.start...hw.Map.ext_ram.end => self.mbc.write(address, val),
                 hw.Map.wram0.start...hw.Map.wram0.end => self.wram0[address - hw.Map.wram0.start] = val,
                 hw.Map.wramx.start...hw.Map.wramx.end => self.wram1[address - hw.Map.wramx.start] = val,
                 hw.Map.echo.start...hw.Map.echo.end => self.write(address - 0x2000, val),
-                hw.Map.oam.start...hw.Map.oam.end => self.oam[address - hw.Map.oam.start] = val,
+                hw.Map.oam.start...hw.Map.oam.end => self.ppu.oam[address - hw.Map.oam.start] = val,
                 hw.Map.io.start...hw.Map.io.end => self.io.write(address, val),
                 hw.Map.hram.start...hw.Map.hram.end => self.hram[address - hw.Map.hram.start] = val,
                 hw.Map.ie_reg => self.interrupts.ie = val,
@@ -60,10 +58,10 @@ pub const Mmu = struct {
     /// Only supports memory regions written to at boot time.
     pub fn bootWrite(self: *Mmu, address: u16, value: u8) void {
         switch (address) {
-            hw.Map.vram.start...hw.Map.vram.end => self.vram[address - hw.Map.vram.start] = value,
+            hw.Map.vram.start...hw.Map.vram.end => self.ppu.vram[address - hw.Map.vram.start] = value,
             hw.Map.wram0.start...hw.Map.wram0.end => self.wram0[address - hw.Map.wram0.start] = value,
             hw.Map.wramx.start...hw.Map.wramx.end => self.wram1[address - hw.Map.wramx.start] = value,
-            hw.Map.oam.start...hw.Map.oam.end => self.oam[address - hw.Map.oam.start] = value,
+            hw.Map.oam.start...hw.Map.oam.end => self.ppu.oam[address - hw.Map.oam.start] = value,
             hw.Map.io.start...hw.Map.io.end => self.io.write(address, value),
             hw.Map.hram.start...hw.Map.hram.end => self.hram[address - hw.Map.hram.start] = value,
             hw.Map.ie_reg => self.interrupts.ie = value,
@@ -80,12 +78,12 @@ pub const Mmu = struct {
         self.timer.tick();
         return switch (address) {
             hw.Map.rom0.start...hw.Map.romx.end => self.mbc.read(address),
-            hw.Map.vram.start...hw.Map.vram.end => self.vram[address - hw.Map.vram.start],
+            hw.Map.vram.start...hw.Map.vram.end => self.ppu.vram[address - hw.Map.vram.start],
             hw.Map.ext_ram.start...hw.Map.ext_ram.end => self.mbc.read(address),
             hw.Map.wram0.start...hw.Map.wram0.end => self.wram0[address - hw.Map.wram0.start],
             hw.Map.wramx.start...hw.Map.wramx.end => self.wram1[address - hw.Map.wramx.start],
             hw.Map.echo.start...hw.Map.echo.end => self.readU8(address - 0x2000),
-            hw.Map.oam.start...hw.Map.oam.end => self.oam[address - hw.Map.oam.start],
+            hw.Map.oam.start...hw.Map.oam.end => self.ppu.oam[address - hw.Map.oam.start],
             hw.Map.unusable.start...hw.Map.unusable.end => 0xFF,
             hw.Map.io.start...hw.Map.io.end => self.io.read(address),
             hw.Map.hram.start...hw.Map.hram.end => self.hram[address - hw.Map.hram.start],
