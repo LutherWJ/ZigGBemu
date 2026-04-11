@@ -53,7 +53,9 @@ pub const SpritePixel = struct {
     pallete: u1 = 0,
 };
 
-const Mode0 = struct {};
+const Mode0 = struct {
+    dots_left: u8 = 0,
+};
 
 const Mode1 = struct {};
 
@@ -65,6 +67,7 @@ const Mode3 = struct {
     // 172 dots is the bare minimum. Extra dots past will cause this value to go negative.
     // This value will be added to mode0 dots_left to shorten its total length.
     dots_left: i16 = 172,
+    pixel_discards: u8 = 0,
     fetcher_state: PixelFetcherState = .{},
 };
 
@@ -80,6 +83,8 @@ const FetcherModes = enum {
     second_tick_bg,
     first_tick_sprt,
     second_tick_sprt,
+    first_tick_win,
+    second_tick_win,
 };
 
 const PixelFetcherState = struct {
@@ -91,6 +96,7 @@ const PixelFetcherState = struct {
     pix_address: u16 = 0, // Base address of pixels being fetched.
     focused_obj_idx: ?u8 = 0, // Multiplexer sets this value when it discovers a sprite needs to be rendered.
     x_offset: u8 = 0,
+    win_tile_x: u5 = 0,
 };
 
 pub const Ppu = struct {
@@ -107,15 +113,16 @@ pub const Ppu = struct {
     obp1: u8 = 0,
     wx: u8 = 0,
     wy: u8 = 0,
+    wlc: u8 = 0,
 
     fetcher_state: PixelFetcherState = .{}, // State machine for pixel fetcher
 
     vram: [hw.Map.vram.size]u8 = [_]u8{0} ** hw.Map.vram.size,
     oam: [hw.Map.oam.size]u8 = [_]u8{0} ** hw.Map.oam.size,
+    mem_lock: bool = false,
     oam_buf: std.BoundedArray(Object, 10) = .{},
     bg_fifo: BackgroundFifo = .{},
     sprite_fifo: SpriteFifo = .{},
-    framebuf: [hw.Lcd.area]u8 = [_]u8{0} ** (hw.Lcd.area),
 
     interrupts: *Interrupts,
     display: *Display,
@@ -179,9 +186,7 @@ pub const Ppu = struct {
                 const byte1 = self.vram[fetcher_state.pix_address];
                 const byte2 = self.vram[fetcher_state.pix_address + 1];
                 const pixels = interleaveBytes(byte1, byte2);
-                self.bg_fifo.pushRow(pixels) catch {
-                    return;
-                };
+                self.bg_fifo.pushRow(pixels) catch return;
                 self.fetcher_state.mode = .first_tick_bg;
             },
             .first_tick_sprt => {
@@ -226,6 +231,29 @@ pub const Ppu = struct {
                 std.debug.assert(fetcher_state.suspended_mode != .second_tick_sprt);
                 fetcher_state.mode = fetcher_state.suspended_mode;
             },
+            .first_tick_win => {
+                // Logic is almost identical to bg but uses different registers
+                const map_base_address: u16 = if (self.lcdc.win_tile_map == 0) 0x9800 else 0x9c00;
+                const y_offset = (self.wlc >> 3) * 32;
+                const x_offset = fetcher_state.win_tile_x;
+                const tile_map_address = map_base_address + y_offset + x_offset;
+                const tile_id = self.vram[tile_map_address];
+
+                // Calculate tile address
+                const tile_base_address = self.getTileBaseAddress(tile_id);
+                const row_offset = @as(u16, (self.wlc % 8) * 2);
+                fetcher_state.pix_address = tile_base_address + row_offset - hw.Map.vram.start;
+
+                fetcher_state.mode = .second_tick_win;
+            },
+            .second_tick_win => {
+                const byte1 = self.vram[fetcher_state.pix_address];
+                const byte2 = self.vram[fetcher_state.pix_address + 1];
+                const pixels = interleaveBytes(byte1, byte2);
+                self.bg_fifo.pushRow(pixels) catch return;
+                fetcher_state.win_tile_x += 1;
+                self.fetcher_state.mode = .first_tick_win;
+            },
         }
     }
 
@@ -248,7 +276,7 @@ pub const Ppu = struct {
         }
 
         if (dots_left.* == 0) {
-            self.state = .{ .mode3 = .{} };
+            self.state = .{ .mode3 = .{ .pixel_discards = self.scx % 8 } };
         }
     }
 
@@ -256,7 +284,7 @@ pub const Ppu = struct {
     // If it finds one, it sets the fetcher state to sprite mode and tells it what index
     // to focus in the oam_buf. Multiple sprites can have the same coordinates so we need
     // to be extremely careful to not fetch the same sprite more than once.
-    fn checkForSprite(self: *Ppu, fetcher_state: *PixelFetcherState) bool {
+    fn checkForSprite(self: *Ppu, fetcher_state: *PixelFetcherState) void {
         const obj_idx = fetcher_state.focused_obj_idx;
         for (0..self.oam_buf.len) |i| {
             const obj = self.oam_buf.get(i);
@@ -266,42 +294,60 @@ pub const Ppu = struct {
                 fetcher_state.focused_obj_idx = @intCast(i);
                 fetcher_state.suspended_mode = fetcher_state.mode;
                 fetcher_state.mode = .first_tick_sprt;
-                return true;
             }
         }
-        return false;
     }
 
     fn pixelTransferTick(self: *Ppu, mode3: *Mode3) void {
         mode3.dots_left -= 4;
         self.fetchTile(&mode3.fetcher_state);
 
-        // Multiplexing!
+        // Multiplexer!
         for (0..4) |_| {
-            if (self.checkForSprite(&mode3.fetcher_state)) {
+            const mode = mode3.fetcher_state.mode;
+            self.checkForSprite(&mode3.fetcher_state);
+            if (mode == .first_tick_sprt or mode == .second_tick_sprt) {
                 return;
             }
 
-            var prio_pixel: u2 = undefined;
-            var prio_pallete: u8 = undefined;
+            // Check if we've encountered the window.
+            if (self.lcdc.win_enable == 1 and self.ly >= self.ly and mode3.fetcher_state.x_offset + 7 == self.wx) {
+                // Ignore this if we've already entered window fetching mode
+                if (mode3.fetcher_state.mode != .first_tick_win or mode3.fetcher_state.mode != .second_tick_win) {
+                    mode3.fetcher_state.mode = .first_tick_win;
+                    self.bg_fifo.clear();
+                    return;
+                }
+            }
 
             const bg_pixel = self.bg_fifo.popPixel() catch return;
+
+            // Check if pixels need to be discarded
+            if (mode3.pixel_discards > 0) {
+                mode3.pixel_discards -= 1;
+                continue;
+            }
+
+            var prio_pixel: u2 = bg_pixel;
+            var prio_pallete: u8 = self.bgp;
+
             if (self.sprite_fifo.popPixel()) |sprite_pixel| {
                 if ((sprite_pixel.bg_priority == 0 or bg_pixel == 0) and sprite_pixel.pixel != 0) {
                     prio_pixel = sprite_pixel.pixel;
                     prio_pallete = if (sprite_pixel.pallete == 0) self.obp0 else self.obp1;
                 }
             }
-            prio_pixel = bg_pixel;
-            prio_pallete = self.bgp;
 
             self.display.drawPixel(prio_pixel, prio_pallete, mode3.fetcher_state.x_offset, self.ly);
             mode3.fetcher_state.x_offset += 1;
-            // Set to null to make sure we don't get a false comparison next time we check
-            // oam_buf for a new index.
-            mode3.fetcher_state.focused_obj_idx = null;
+            mode3.fetcher_state.focused_obj_idx = null; // clear the obj bookmark
 
             if (mode3.fetcher_state.x_offset == 160) {
+                const final_mode = mode3.fetcher_state.mode;
+                if (final_mode == .first_tick_win or final_mode == .second_tick_win) {
+                    self.wlc += 1;
+                }
+
                 self.state = .{ .mode0 = .{} };
                 self.bg_fifo.clear();
                 self.sprite_fifo.clear();
