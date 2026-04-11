@@ -1,10 +1,13 @@
 const std = @import("std");
 const Interrupts = @import("interrupts").Interrupts;
 const hw = @import("hw");
+const PixelFifos = @import("pixel_fifo");
+const Display = @import("display").Display;
+const BackgroundFifo = PixelFifos.BackgroundFifo;
+const SpriteFifo = PixelFifos.SpriteFifo;
 const writeInt = std.mem.writeInt;
 const readInt = std.mem.readInt;
 
-const LinearFifo = std.fifo.LinearFifo;
 const LcdStatus = packed struct(u8) {
     ppu_mode: u2 = 0,
     ly_eql_lyc: u1 = 0,
@@ -29,17 +32,25 @@ const LcdControl = packed struct(u8) {
 const ObjectAttributes = packed struct(u8) {
     pad: u3 = 0, // cgb only pallet
     bank: u1 = 0,
-    dmg_pallet: u1 = 0,
+    dmg_pallete: u1 = 0,
     x_flip: u1 = 0,
     y_flip: u1 = 0,
     priority: u1 = 0,
 };
 
-const Object = packed struct(u32) {
+pub const Object = packed struct(u32) {
     y_pos: u8 = 0,
     x_pos: u8 = 0,
-    tile_idx: u8 = 0,
+    tile_id: u8 = 0,
     flags: ObjectAttributes = .{},
+};
+
+pub const SpritePixel = struct {
+    pixel: u2 = 0,
+    x_pos: u8 = 0,
+    oam_idx: u8 = 0,
+    bg_priority: u1 = 0,
+    pallete: u1 = 0,
 };
 
 const Mode0 = struct {};
@@ -64,12 +75,21 @@ const PpuState = union(enum) {
     mode3: Mode3,
 };
 
+const FetcherModes = enum {
+    first_tick_bg,
+    second_tick_bg,
+    first_tick_sprt,
+    second_tick_sprt,
+};
+
 const PixelFetcherState = struct {
     // The pixel fetcher has 4 states but it goes through two states every m-cycle
     // and this emulator only guarentees m-cycle accuracy. For this reason,
     // we use an enum to represent the first and second cycles.
-    mode: enum { first_tick, second_tick } = .first_tick,
-    tile_address: u16 = 0, // Base address of tiles being fetched
+    mode: FetcherModes = .first_tick_bg,
+    suspended_mode: FetcherModes = .first_tick_bg,
+    pix_address: u16 = 0, // Base address of pixels being fetched.
+    focused_obj_idx: ?u8 = 0, // Multiplexer sets this value when it discovers a sprite needs to be rendered.
     x_offset: u8 = 0,
 };
 
@@ -93,16 +113,17 @@ pub const Ppu = struct {
     vram: [hw.Map.vram.size]u8 = [_]u8{0} ** hw.Map.vram.size,
     oam: [hw.Map.oam.size]u8 = [_]u8{0} ** hw.Map.oam.size,
     oam_buf: std.BoundedArray(Object, 10) = .{},
-    bg_fifo: LinearFifo(u8, .{ .Static = 8 }) = LinearFifo(u8, .{ .Static = 8 }).init(),
-    obj_fifo: LinearFifo(u8, .{ .Static = 8 }) = LinearFifo(u8, .{ .Static = 8 }).init(),
+    bg_fifo: BackgroundFifo = .{},
+    sprite_fifo: SpriteFifo = .{},
+    framebuf: [hw.Lcd.area]u8 = [_]u8{0} ** (hw.Lcd.area),
 
     interrupts: *Interrupts,
+    display: *Display,
 
-    pub fn init(self: *Ppu, interrupts: *Interrupts) void {
+    pub fn init(self: *Ppu, interrupts: *Interrupts, display: *Display) void {
         self.* = Ppu{
             .interrupts = interrupts,
-            .bg_fifo = LinearFifo(u8, .{ .Static = 8 }).init(),
-            .obj_fifo = LinearFifo(u8, .{ .Static = 8 }).init(),
+            .display = display,
         };
 
         self.oam_buf = std.BoundedArray(Object, 10).init(0) catch unreachable;
@@ -136,7 +157,7 @@ pub const Ppu = struct {
     fn fetchTile(self: *Ppu, fetcher_state: *PixelFetcherState) void {
         // Calculate tile id if its the first fetcher m-cycle
         switch (fetcher_state.mode) {
-            .first_tick => {
+            .first_tick_bg => {
                 // Calculate tile ID
                 const map_y = (self.scy + self.ly) & 0xFF;
                 const map_x = (self.scx + fetcher_state.x_offset) & 0xFF;
@@ -149,28 +170,67 @@ pub const Ppu = struct {
                 // Calculate tile address
                 const tile_base_address = self.getTileBaseAddress(tile_id);
                 const row_offset = @as(u16, (map_y % 8) * 2);
-                fetcher_state.tile_address = tile_base_address + row_offset - hw.Map.vram.start;
+                fetcher_state.pix_address = tile_base_address + row_offset - hw.Map.vram.start;
 
-                // Don't bother reading the address since nothing gets pushed to the fifos
-                // until next tick.
-                fetcher_state.mode = .second_tick;
+                // Don't bother reading the address since nothing gets pushed to the fifos until next tick
+                fetcher_state.mode = .second_tick_bg;
             },
-            .second_tick => {
-                const pixels = self.vram[fetcher_state.tile_address .. fetcher_state.tile_address + 1];
-                self.bg_fifo.write(pixels) catch {
+            .second_tick_bg => {
+                const byte1 = self.vram[fetcher_state.pix_address];
+                const byte2 = self.vram[fetcher_state.pix_address + 1];
+                const pixels = interleaveBytes(byte1, byte2);
+                self.bg_fifo.pushRow(pixels) catch {
                     return;
                 };
-                self.fetcher_state.mode = .first_tick;
+                self.fetcher_state.mode = .first_tick_bg;
+            },
+            .first_tick_sprt => {
+                // Calculate which row we're drawing.
+                const obj = self.oam_buf.get(fetcher_state.focused_obj_idx.?);
+                const true_y: i32 = @as(i32, obj.y_pos) - 16;
+                const current_line: i32 = @as(i32, self.ly);
+                var sprite_row: u16 = @as(u16, @intCast(current_line - true_y));
+
+                // Check if its flipped and recalculate
+                const y_flip = obj.flags.y_flip == 1;
+                const sprite_height: u8 = if (self.lcdc.obj_size == 1) 16 else 8;
+                if (y_flip) sprite_row ^= (sprite_height - 1);
+
+                // Find the pixel address
+                const base_address = self.getTileBaseAddress(obj.tile_id);
+                fetcher_state.pix_address = base_address + (sprite_row * 2) - hw.Map.vram.start;
+
+                fetcher_state.mode = .second_tick_sprt;
+            },
+            .second_tick_sprt => {
+                const byte1 = self.vram[fetcher_state.pix_address];
+                const byte2 = self.vram[fetcher_state.pix_address + 1];
+                const pixels = interleaveBytes(byte1, byte2);
+
+                const obj = self.oam_buf.get(fetcher_state.focused_obj_idx.?);
+                var sprite_pixels: [8]SpritePixel = undefined;
+                for (0..8) |i| {
+                    const offset: u4 = @truncate(i * 2);
+                    const pixel: u2 = @truncate(pixels >> offset);
+                    sprite_pixels[i] = .{
+                        .pixel = pixel,
+                        .x_pos = obj.x_pos,
+                        .oam_idx = fetcher_state.focused_obj_idx.?,
+                        .bg_priority = obj.flags.priority,
+                        .pallete = obj.flags.dmg_pallete,
+                    };
+                }
+
+                self.sprite_fifo.pushRow(sprite_pixels);
+                std.debug.assert(fetcher_state.suspended_mode != .first_tick_sprt);
+                std.debug.assert(fetcher_state.suspended_mode != .second_tick_sprt);
+                fetcher_state.mode = fetcher_state.suspended_mode;
             },
         }
     }
 
-    fn tickMultiplexer(self: *Ppu) void {
-        _ = self;
-    }
-
     fn oamScanTick(self: *Ppu, dots_left: *u8) void {
-        if (self.oam_buf.len == 10) return;
+        if (self.oam_buf.len >= 10) return;
         const index = (80 - dots_left.*) * 2;
         var objs = [2]Object{ .{}, .{} };
         // This will never go out of bounds because this state only lasts for 80 t-cycles 100% of the time.
@@ -183,7 +243,7 @@ pub const Ppu = struct {
 
         for (objs) |obj| {
             if (self.ly >= obj.y_pos - 16 and self.ly < obj.y_pos - 16 + sprite_height) {
-                self.oam_buf.append(obj) catch {};
+                self.oam_buf.append(obj) catch unreachable;
             }
         }
 
@@ -192,8 +252,75 @@ pub const Ppu = struct {
         }
     }
 
+    // Iterates through selected objects looking for one that starts on the current pixel.
+    // If it finds one, it sets the fetcher state to sprite mode and tells it what index
+    // to focus in the oam_buf. Multiple sprites can have the same coordinates so we need
+    // to be extremely careful to not fetch the same sprite more than once.
+    fn checkForSprite(self: *Ppu, fetcher_state: *PixelFetcherState) bool {
+        const obj_idx = fetcher_state.focused_obj_idx;
+        for (0..self.oam_buf.len) |i| {
+            const obj = self.oam_buf.get(i);
+            const target_x = fetcher_state.x_offset + 8;
+            // make sure we don't fetch the same object infinitely
+            if (obj.x_pos == target_x and (obj_idx == null or obj_idx.? < i)) {
+                fetcher_state.focused_obj_idx = @intCast(i);
+                fetcher_state.suspended_mode = fetcher_state.mode;
+                fetcher_state.mode = .first_tick_sprt;
+                return true;
+            }
+        }
+        return false;
+    }
+
     fn pixelTransferTick(self: *Ppu, mode3: *Mode3) void {
         mode3.dots_left -= 4;
         self.fetchTile(&mode3.fetcher_state);
+
+        // Multiplexing!
+        for (0..4) |_| {
+            if (self.checkForSprite(&mode3.fetcher_state)) {
+                return;
+            }
+
+            var prio_pixel: u2 = undefined;
+            var prio_pallete: u8 = undefined;
+
+            const bg_pixel = self.bg_fifo.popPixel() catch return;
+            if (self.sprite_fifo.popPixel()) |sprite_pixel| {
+                if ((sprite_pixel.bg_priority == 0 or bg_pixel == 0) and sprite_pixel.pixel != 0) {
+                    prio_pixel = sprite_pixel.pixel;
+                    prio_pallete = if (sprite_pixel.pallete == 0) self.obp0 else self.obp1;
+                }
+            }
+            prio_pixel = bg_pixel;
+            prio_pallete = self.bgp;
+
+            self.display.drawPixel(prio_pixel, prio_pallete, mode3.fetcher_state.x_offset, self.ly);
+            mode3.fetcher_state.x_offset += 1;
+            // Set to null to make sure we don't get a false comparison next time we check
+            // oam_buf for a new index.
+            mode3.fetcher_state.focused_obj_idx = null;
+
+            if (mode3.fetcher_state.x_offset == 160) {
+                self.state = .{ .mode0 = .{} };
+                self.bg_fifo.clear();
+                self.sprite_fifo.clear();
+                return;
+            }
+        }
     }
 };
+
+fn interleaveBytes(byte1: u8, byte2: u8) u16 {
+    var x = @as(u16, byte1);
+    x = (x | (x << 4)) & 0x0F0F;
+    x = (x | (x << 2)) & 0x3333;
+    x = (x | (x << 1)) & 0x5555;
+
+    var y = @as(u16, byte2);
+    y = (y | (y << 4)) & 0x0F0F;
+    y = (y | (y << 2)) & 0x3333;
+    y = (y | (y << 1)) & 0x5555;
+
+    return x | (y << 1);
+}

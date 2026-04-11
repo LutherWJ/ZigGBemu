@@ -8,6 +8,7 @@ const Io = @import("io").Io;
 const Interrupts = @import("interrupts").Interrupts;
 const Sdt = @import("sdt").Sdt;
 const Ppu = @import("ppu").Ppu;
+const Display = @import("display").Display;
 const hw = @import("hw");
 
 pub const Emulator = struct {
@@ -22,6 +23,7 @@ pub const Emulator = struct {
     mbc: *Mbc,
     cpu: *Cpu,
     ppu: *Ppu,
+    display: *Display,
 
     pub fn init(allocator: std.mem.Allocator, rom_buf: []const u8) !*Emulator {
         var arena = std.heap.ArenaAllocator.init(allocator);
@@ -39,8 +41,10 @@ pub const Emulator = struct {
         emu.sdt = try aa.create(Sdt);
         emu.sdt.* = .{ .interrupts = emu.interrupts };
 
+        emu.display = try aa.create(Display);
+
         emu.ppu = try aa.create(Ppu);
-        emu.ppu.init(emu.interrupts);
+        emu.ppu.init(emu.interrupts, emu.display);
 
         emu.timer = try aa.create(Timer);
         emu.timer.* = .{ .interrupts = emu.interrupts, .sdt = emu.sdt, .ppu = emu.ppu };

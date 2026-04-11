@@ -21,6 +21,8 @@ pub fn build(b: *std.Build) void {
         .{ .name = "sdt", .path = "src/sdt.zig" },
         .{ .name = "ppu", .path = "src/ppu.zig" },
         .{ .name = "emulator", .path = "src/emulator.zig" },
+        .{ .name = "pixel_fifo", .path = "src/pixel_fifo.zig" },
+        .{ .name = "display", .path = "src/display.zig" },
     };
 
     // 2. Initialize and Link Modules

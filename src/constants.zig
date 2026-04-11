@@ -5,6 +5,12 @@ pub const Timings = struct {
     pub const cyclesPerFrame: comptime_int = 70224;
 };
 
+pub const Lcd = struct {
+    pub const width: comptime_int = 160;
+    pub const height: comptime_int = 144;
+    pub const area: comptime_int = width * height;
+};
+
 pub const Map = struct {
     pub const rom0 = struct {
         pub const start: u16 = 0x0000;
