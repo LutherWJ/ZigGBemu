@@ -9,7 +9,7 @@ const writeInt = std.mem.writeInt;
 const readInt = std.mem.readInt;
 
 const LcdStatus = packed struct(u8) {
-    ppu_mode: u2 = 0,
+    ppu_mode: u2 = 0, // starts in mode 2
     ly_eql_lyc: u1 = 0,
     mode0_sel: u1 = 0,
     mode1_sel: u1 = 0,
@@ -54,10 +54,12 @@ pub const SpritePixel = struct {
 };
 
 const Mode0 = struct {
-    dots_left: u8 = 0,
+    dots_left: u8 = 204,
 };
 
-const Mode1 = struct {};
+const Mode1 = struct {
+    dots_left: u16 = 456,
+};
 
 const Mode2 = struct {
     dots_left: u8 = 80,
@@ -100,7 +102,7 @@ const PixelFetcherState = struct {
 };
 
 pub const Ppu = struct {
-    state: PpuState = .{ .mode2 = .{} },
+    state: PpuState = .{ .mode0 = .{} },
     lcdc: LcdControl = .{}, // control register
     stat: LcdStatus = .{}, // status register
     scy: u8 = 0, // vertical scroll register
@@ -119,7 +121,8 @@ pub const Ppu = struct {
 
     vram: [hw.Map.vram.size]u8 = [_]u8{0} ** hw.Map.vram.size,
     oam: [hw.Map.oam.size]u8 = [_]u8{0} ** hw.Map.oam.size,
-    mem_lock: bool = false,
+    vram_lock: bool = false,
+    oam_lock: bool = false,
     oam_buf: std.BoundedArray(Object, 10) = .{},
     bg_fifo: BackgroundFifo = .{},
     sprite_fifo: SpriteFifo = .{},
@@ -147,6 +150,24 @@ pub const Ppu = struct {
     pub fn writeDma(self: *Ppu, value: u8) void {
         self.state = .{ .mode2 = .{} };
         self.dma = value;
+    }
+
+    pub fn writeVram(self: *Ppu, address: u16, value: u8) void {
+        if (self.vram_lock) return;
+        self.vram[address - hw.Map.vram.start] = value;
+    }
+
+    pub fn writeOam(self: *Ppu, address: u16, value: u8) void {
+        if (self.oam_lock) return;
+        self.oam[address - hw.Map.oam.start] = value;
+    }
+
+    pub fn readVram(self: *Ppu, address: u16) u8 {
+        return if (self.vram_lock) self.vram[address - hw.Map.vram.start] else 0xFF;
+    }
+
+    pub fn readOam(self: *Ppu, address: u16) u8 {
+        return if (self.oam_lock) self.oam[address - hw.Map.oam.start] else 0xFF;
     }
 
     fn getTileBaseAddress(self: *Ppu, tile_id: u8) u16 {
@@ -277,6 +298,9 @@ pub const Ppu = struct {
 
         if (dots_left.* == 0) {
             self.state = .{ .mode3 = .{ .pixel_discards = self.scx % 8 } };
+            self.stat.ppu_mode = 3;
+            self.vram_lock = true;
+            self.oam_lock = true;
         }
     }
 
@@ -344,16 +368,74 @@ pub const Ppu = struct {
 
             if (mode3.fetcher_state.x_offset == 160) {
                 const final_mode = mode3.fetcher_state.mode;
+                const final_dots = mode3.dots_left;
                 if (final_mode == .first_tick_win or final_mode == .second_tick_win) {
                     self.wlc += 1;
                 }
 
-                self.state = .{ .mode0 = .{} };
                 self.bg_fifo.clear();
                 self.sprite_fifo.clear();
+
+                std.debug.assert(final_dots <= 0); // should be negative or exactly zero at this point
+                const mode0_dots: u8 = @intCast(204 + final_dots);
+                self.state = .{ .mode0 = .{ .dots_left = mode0_dots } };
+                self.stat.ppu_mode = 0;
+                self.vram_lock = false;
+                self.oam_lock = false;
+
+                if (self.stat.mode0_sel == 1) {
+                    self.interrupts.request(.lcd);
+                }
+
                 return;
             }
         }
+    }
+
+    fn checkLycInterrupt(self: *Ppu) void {
+        self.stat.ly_eql_lyc = 1;
+        if (self.stat.lyc_sel == 1) {
+            self.interrupts.request(.lcd);
+        } else {
+            self.stat.ly_eql_lyc = 0;
+        }
+    }
+
+    fn tickHBlank(self: *Ppu, mode0_state: Mode0) void {
+        mode0_state.dots_left -= 4;
+
+        if (mode0_state.dots_left > 0) return;
+
+        self.ly += 1;
+        self.checkLycInterrupt();
+
+        if (self.ly == 144) {
+            self.state = .{ .mode1 = .{ .dots_left = 456 } };
+            if (self.stat.mode1_sel == 1) self.interrupts.request(.lcd);
+            self.interrupts.request(.vblank);
+            return;
+        }
+
+        self.stat.ppu_mode = 1;
+        self.state = .{ .mode2 = .{ .dots_left = 80 } };
+        if (self.stat.mode2_sel == 1) self.interrupts.request(.lcd);
+    }
+
+    fn tickVBlank(self: *Ppu, mode1_state: Mode1) void {
+        mode1_state.dots_left -= 4;
+        if (mode1_state.dots_left > 0) return;
+
+        self.ly += 1;
+        self.checkLycInterrupt();
+
+        if (self.ly > 153) {
+            self.state = .{ .mode2 = .{} };
+            self.stat.ppu_mode = 2;
+            self.vram_lock = true;
+            if (self.stat.mode2_sel == 1) self.interrupts.request(.lcd);
+            return;
+        }
+        mode1_state.dots_left = 456; // restart!
     }
 };
 
