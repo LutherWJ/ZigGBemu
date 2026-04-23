@@ -63,7 +63,11 @@ pub const Io = struct {
             hw.Io.obp1 => self.ppu.obp1 = value,
             hw.Io.wy => self.ppu.wy = value,
             hw.Io.wx => self.ppu.wx = value,
-            else => std.debug.print("[IO] Write to unimplemented address: 0x{X:0>4} = 0x{X:0>2}\n", .{ address, value }),
+            else => {
+                if (@import("builtin").os.tag != .freestanding) {
+                    std.debug.print("[IO] Write to unimplemented address: 0x{X:0>4} = 0x{X:0>2}\n", .{ address, value });
+                }
+            },
         }
     }
 };

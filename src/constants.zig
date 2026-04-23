@@ -9,6 +9,12 @@ pub const Lcd = struct {
     pub const width: comptime_int = 160;
     pub const height: comptime_int = 144;
     pub const area: comptime_int = width * height;
+    pub const dmg_palette = [4]u32{
+        0xFFFFFFFF,
+        0xAAAAAAAA,
+        0x55555555,
+        0x00000000,
+    };
 };
 
 pub const Map = struct {

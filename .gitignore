@@ -7,4 +7,6 @@ gb-test-roms/
 ZigGBemu.iml
 CLAUDE.md
 GEMINI.md
-
+node_modules/
+.env
+dist/

@@ -22,7 +22,6 @@ pub fn build(b: *std.Build) void {
         .{ .name = "ppu", .path = "src/ppu.zig" },
         .{ .name = "emulator", .path = "src/emulator.zig" },
         .{ .name = "pixel_fifo", .path = "src/pixel_fifo.zig" },
-        .{ .name = "display", .path = "src/display.zig" },
     };
 
     // 2. Initialize and Link Modules
@@ -95,13 +94,22 @@ pub fn build(b: *std.Build) void {
         .target = b.resolveTargetQuery(.{
             .cpu_arch = .wasm32,
             .os_tag = .freestanding,
+            .cpu_features_add = std.Target.wasm.featureSet(&[_]std.Target.wasm.Feature{ .atomics, .bulk_memory }),
         }),
         .optimize = optimize,
     });
 
+    wasm.root_module.single_threaded = true;
+
     // This ensures all exported functions in ffi.zig are visible to JavaScript
     wasm.rdynamic = true;
     wasm.entry = .disabled;
+
+    // Enable shared memory
+    wasm.import_memory = true;
+    wasm.shared_memory = true;
+    wasm.initial_memory = 1024 * 64 * 1024; // 64MB
+    wasm.max_memory = 1024 * 64 * 1024; // 64MB
 
     for (internal_modules) |m| {
         wasm.root_module.addImport(m.name, m.mod);
@@ -109,6 +117,6 @@ pub fn build(b: *std.Build) void {
 
     // This copies the compiled wasm from the zig-cache directly into your web/ folder
     const copy_wasm = b.addUpdateSourceFiles();
-    copy_wasm.addCopyFileToSource(wasm.getEmittedBin(), "web/ziggbemu.wasm");
+    copy_wasm.addCopyFileToSource(wasm.getEmittedBin(), "web/client/public/ziggbemu.wasm");
     wasm_step.dependOn(&copy_wasm.step);
 }

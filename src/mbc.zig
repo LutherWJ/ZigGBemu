@@ -20,7 +20,9 @@ pub const Mbc = union(enum) {
                 break :blk .{ .mbc1 = .{ .rom = rom, .ram = ram } };
             },
             else => {
-                std.log.err("Unsupported Cartridge Type: 0x{X:0>2}", .{header.cart_type});
+                if (@import("builtin").os.tag != .freestanding) {
+                    std.log.err("Unsupported Cartridge Type: 0x{X:0>2}", .{header.cart_type});
+                }
                 return error.UnsupportedMbcType;
             },
         };

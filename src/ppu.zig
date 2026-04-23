@@ -1,8 +1,10 @@
+// TODO: This 100% needs to be tested
+// TODO: Check how this is supposed to be initialized
+
 const std = @import("std");
 const Interrupts = @import("interrupts").Interrupts;
 const hw = @import("hw");
 const PixelFifos = @import("pixel_fifo");
-const Display = @import("display").Display;
 const BackgroundFifo = PixelFifos.BackgroundFifo;
 const SpriteFifo = PixelFifos.SpriteFifo;
 const writeInt = std.mem.writeInt;
@@ -54,15 +56,15 @@ pub const SpritePixel = struct {
 };
 
 const Mode0 = struct {
-    dots_left: u8 = 204,
+    dots_left: i16 = 204,
 };
 
 const Mode1 = struct {
-    dots_left: u16 = 456,
+    dots_left: i16 = 456,
 };
 
 const Mode2 = struct {
-    dots_left: u8 = 80,
+    dots_left: i16 = 80,
 };
 
 const Mode3 = struct {
@@ -71,6 +73,20 @@ const Mode3 = struct {
     dots_left: i16 = 172,
     pixel_discards: u8 = 0,
     fetcher_state: PixelFetcherState = .{},
+};
+
+const Mode = enum(u2) {
+    hblank = 0,
+    vblank = 1,
+    oam_scan = 2,
+    pixel_transfer = 3,
+};
+
+const ModeContext = union(Mode) {
+    hblank: struct { dots: i16 },
+    vblank: void,
+    oam_scan: void,
+    pixel_transfer: struct { discards: u8 },
 };
 
 const PpuState = union(enum) {
@@ -110,12 +126,12 @@ pub const Ppu = struct {
     ly: u8 = 0, // scanline register
     lyc: u8 = 0, // scanline control register
     dma: u8 = 0,
-    bgp: u8 = 0,
-    obp0: u8 = 0,
-    obp1: u8 = 0,
+    bgp: u8 = 0, // Background pallete
+    obp0: u8 = 0, // Object pallete 1
+    obp1: u8 = 0, // Object pallete 2
     wx: u8 = 0,
     wy: u8 = 0,
-    wlc: u8 = 0,
+    wlc: u8 = 0, // Window Line control
 
     fetcher_state: PixelFetcherState = .{}, // State machine for pixel fetcher
 
@@ -126,29 +142,70 @@ pub const Ppu = struct {
     oam_buf: std.BoundedArray(Object, 10) = .{},
     bg_fifo: BackgroundFifo = .{},
     sprite_fifo: SpriteFifo = .{},
+    frame_buf: std.BoundedArray(u32, hw.Lcd.area) = .{},
 
     interrupts: *Interrupts,
-    display: *Display,
 
-    pub fn init(self: *Ppu, interrupts: *Interrupts, display: *Display) void {
-        self.* = Ppu{
-            .interrupts = interrupts,
-            .display = display,
-        };
+    fn setMode(self: *Ppu, context: ModeContext) void {
+        switch (context) {
+            .hblank => |ctx| {
+                self.state = .{ .mode0 = .{ .dots_left = ctx.dots } };
+                self.stat.ppu_mode = 0;
+                self.vram_lock = false;
+                self.oam_lock = false;
+                if (self.stat.mode0_sel == 1) self.interrupts.request(.lcd);
+            },
+            .vblank => {
+                self.state = .{ .mode1 = .{ .dots_left = 456 } };
+                self.stat.ppu_mode = 1;
+                self.vram_lock = false;
+                self.oam_lock = false;
+                self.interrupts.request(.vblank);
+                if (self.stat.mode1_sel == 1) self.interrupts.request(.lcd);
+            },
+            .oam_scan => {
+                if (self.stat.ppu_mode == 1) self.ly = 0;
+                self.state = .{ .mode2 = .{ .dots_left = 80 } };
+                self.stat.ppu_mode = 2;
+                self.vram_lock = false;
+                self.oam_lock = true;
+                self.oam_buf.clear();
+                if (self.stat.mode2_sel == 1) self.interrupts.request(.lcd);
+            },
+            .pixel_transfer => |ctx| {
+                self.state = .{ .mode3 = .{
+                    .dots_left = 172,
+                    .pixel_discards = ctx.discards,
+                    .fetcher_state = .{},
+                } };
+                self.stat.ppu_mode = 3;
+                self.vram_lock = true;
+                self.oam_lock = true;
+            },
+        }
+    }
 
+    pub fn init(self: *Ppu, interrupts: *Interrupts) void {
+        self.interrupts = interrupts;
         self.oam_buf = std.BoundedArray(Object, 10).init(0) catch unreachable;
+        self.frame_buf = std.BoundedArray(u32, hw.Lcd.area).init(0) catch unreachable;
     }
 
     pub fn tick(self: *Ppu) void {
-        switch (self.state) {
-            .mode2 => |*mode2| self.oamScanTick(&mode2.dots_left),
-            .mode3 => |*mode3| self.pixelTransferTick(mode3),
-            else => {},
+        const transition = switch (self.state) {
+            .mode0 => |*m| self.tickHBlank(m),
+            .mode1 => |*m| self.tickVBlank(m),
+            .mode2 => |*m| self.oamScanTick(m),
+            .mode3 => |*m| self.pixelTransferTick(m),
+        };
+
+        if (transition) |ctx| {
+            self.setMode(ctx);
         }
     }
 
     pub fn writeDma(self: *Ppu, value: u8) void {
-        self.state = .{ .mode2 = .{} };
+        self.setMode(.{ .oam_scan = {} });
         self.dma = value;
     }
 
@@ -173,11 +230,12 @@ pub const Ppu = struct {
     fn getTileBaseAddress(self: *Ppu, tile_id: u8) u16 {
         return if (self.lcdc.bg_win_tiles == 1)
             // Unsigned mode ($8000 - $8FFF)
-            0x8000 + (@as(u16, tile_id) * 16)
+            0x8000 +% (@as(u16, tile_id) * 16)
         else blk: {
             // Signed mode ($8800 - $97FF)
             const signed_id: i8 = @bitCast(tile_id);
             const result_i32: i32 = 0x9000 + (@as(i32, signed_id) * 16);
+            std.debug.assert(result_i32 >= 0 and result_i32 <= 0xFFFF);
             break :blk @intCast(result_i32);
         };
     }
@@ -187,13 +245,13 @@ pub const Ppu = struct {
         switch (fetcher_state.mode) {
             .first_tick_bg => {
                 // Calculate tile ID
-                const map_y = (self.scy + self.ly) & 0xFF;
-                const map_x = (self.scx + fetcher_state.x_offset) & 0xFF;
+                const map_y: u8 = (self.scy +% self.ly);
+                const map_x: u8 = (self.scx +% fetcher_state.x_offset);
                 const grid_y = map_y >> 3; // divide by 8
                 const grid_x = map_x >> 3;
-                const map_base_address: u16 = if (self.lcdc.obj_size == 1) 0x9800 else 0x9c00;
+                const map_base_address: u16 = if (self.lcdc.bg_tile_map == 1) 0x9800 else 0x9c00;
                 const tile_map_address = map_base_address + (grid_y * 32) + grid_x;
-                const tile_id = self.vram[tile_map_address];
+                const tile_id = self.vram[tile_map_address - hw.Map.vram.start];
 
                 // Calculate tile address
                 const tile_base_address = self.getTileBaseAddress(tile_id);
@@ -215,7 +273,9 @@ pub const Ppu = struct {
                 const obj = self.oam_buf.get(fetcher_state.focused_obj_idx.?);
                 const true_y: i32 = @as(i32, obj.y_pos) - 16;
                 const current_line: i32 = @as(i32, self.ly);
-                var sprite_row: u16 = @as(u16, @intCast(current_line - true_y));
+                std.debug.assert((current_line - true_y) > 0);
+                const signed_row: i16 = @truncate(current_line - true_y);
+                var sprite_row: u16 = @as(u16, @bitCast(signed_row));
 
                 // Check if its flipped and recalculate
                 const y_flip = obj.flags.y_flip == 1;
@@ -255,14 +315,14 @@ pub const Ppu = struct {
             .first_tick_win => {
                 // Logic is almost identical to bg but uses different registers
                 const map_base_address: u16 = if (self.lcdc.win_tile_map == 0) 0x9800 else 0x9c00;
-                const y_offset = (self.wlc >> 3) * 32;
-                const x_offset = fetcher_state.win_tile_x;
-                const tile_map_address = map_base_address + y_offset + x_offset;
-                const tile_id = self.vram[tile_map_address];
+                const y_offset: u16 = (self.wlc >> 3) * 32;
+                const x_offset: u16 = fetcher_state.win_tile_x;
+                const tile_map_address: u16 = map_base_address + y_offset + x_offset;
+                const tile_id = self.vram[tile_map_address - hw.Map.vram.start];
 
                 // Calculate tile address
-                const tile_base_address = self.getTileBaseAddress(tile_id);
-                const row_offset = @as(u16, (self.wlc % 8) * 2);
+                const tile_base_address: u16 = self.getTileBaseAddress(tile_id);
+                const row_offset: u16 = @as(u16, (self.wlc % 8) * 2);
                 fetcher_state.pix_address = tile_base_address + row_offset - hw.Map.vram.start;
 
                 fetcher_state.mode = .second_tick_win;
@@ -278,30 +338,32 @@ pub const Ppu = struct {
         }
     }
 
-    fn oamScanTick(self: *Ppu, dots_left: *u8) void {
-        if (self.oam_buf.len >= 10) return;
-        const index = (80 - dots_left.*) * 2;
-        var objs = [2]Object{ .{}, .{} };
-        // This will never go out of bounds because this state only lasts for 80 t-cycles 100% of the time.
-        std.debug.assert(index + 4 < self.oam.len);
-        objs[0] = @bitCast(self.oam[index..][0..4].*);
-        objs[1] = @bitCast(self.oam[index + 4 ..][0..4].*);
-        dots_left.* -= 4;
+    fn oamScanTick(self: *Ppu, mode2: *Mode2) ?ModeContext {
+        std.debug.assert(mode2.dots_left <= 80);
+        std.debug.assert(@mod(mode2.dots_left, 4) == 0);
 
-        const sprite_height: u8 = if (self.lcdc.obj_size == 0) 8 else 16;
+        if (self.oam_buf.len < 10) {
+            const index: u16 = @as(u16, @intCast(80 - mode2.dots_left)) * 2;
+            var objs = [2]Object{ .{}, .{} };
+            // This will never go out of bounds because this state only lasts for 80 t-cycles 100% of the time.
+            std.debug.assert(index + 4 <= self.oam.len);
+            objs[0] = @bitCast(self.oam[index..][0..4].*);
+            objs[1] = @bitCast(self.oam[index + 4 ..][0..4].*);
 
-        for (objs) |obj| {
-            if (self.ly >= obj.y_pos - 16 and self.ly < obj.y_pos - 16 + sprite_height) {
-                self.oam_buf.append(obj) catch unreachable;
+            const sprite_height: u8 = if (self.lcdc.obj_size == 0) 8 else 16;
+
+            for (objs) |obj| {
+                if (self.ly >= obj.y_pos -% 16 and self.ly < obj.y_pos -% 16 +% sprite_height) {
+                    self.oam_buf.append(obj) catch unreachable;
+                }
             }
         }
 
-        if (dots_left.* == 0) {
-            self.state = .{ .mode3 = .{ .pixel_discards = self.scx % 8 } };
-            self.stat.ppu_mode = 3;
-            self.vram_lock = true;
-            self.oam_lock = true;
+        mode2.dots_left -= 4;
+        if (mode2.dots_left == 0) {
+            return .{ .pixel_transfer = .{ .discards = self.scx % 8 } };
         }
+        return null;
     }
 
     // Iterates through selected objects looking for one that starts on the current pixel.
@@ -322,7 +384,7 @@ pub const Ppu = struct {
         }
     }
 
-    fn pixelTransferTick(self: *Ppu, mode3: *Mode3) void {
+    fn pixelTransferTick(self: *Ppu, mode3: *Mode3) ?ModeContext {
         mode3.dots_left -= 4;
         self.fetchTile(&mode3.fetcher_state);
 
@@ -331,20 +393,20 @@ pub const Ppu = struct {
             const mode = mode3.fetcher_state.mode;
             self.checkForSprite(&mode3.fetcher_state);
             if (mode == .first_tick_sprt or mode == .second_tick_sprt) {
-                return;
+                return null;
             }
 
             // Check if we've encountered the window.
-            if (self.lcdc.win_enable == 1 and self.ly >= self.ly and mode3.fetcher_state.x_offset + 7 == self.wx) {
+            if (self.lcdc.win_enable == 1 and self.ly >= self.wy and mode3.fetcher_state.x_offset + 7 == self.wx) {
                 // Ignore this if we've already entered window fetching mode
-                if (mode3.fetcher_state.mode != .first_tick_win or mode3.fetcher_state.mode != .second_tick_win) {
+                if (mode3.fetcher_state.mode != .first_tick_win and mode3.fetcher_state.mode != .second_tick_win) {
                     mode3.fetcher_state.mode = .first_tick_win;
                     self.bg_fifo.clear();
-                    return;
+                    return null;
                 }
             }
 
-            const bg_pixel = self.bg_fifo.popPixel() catch return;
+            const bg_pixel = self.bg_fifo.popPixel() catch return null;
 
             // Check if pixels need to be discarded
             if (mode3.pixel_discards > 0) {
@@ -362,7 +424,7 @@ pub const Ppu = struct {
                 }
             }
 
-            self.display.drawPixel(prio_pixel, prio_pallete, mode3.fetcher_state.x_offset, self.ly);
+            self.drawPixel(prio_pixel, prio_pallete);
             mode3.fetcher_state.x_offset += 1;
             mode3.fetcher_state.focused_obj_idx = null; // clear the obj bookmark
 
@@ -377,65 +439,62 @@ pub const Ppu = struct {
                 self.sprite_fifo.clear();
 
                 std.debug.assert(final_dots <= 0); // should be negative or exactly zero at this point
-                const mode0_dots: u8 = @intCast(204 + final_dots);
-                self.state = .{ .mode0 = .{ .dots_left = mode0_dots } };
-                self.stat.ppu_mode = 0;
-                self.vram_lock = false;
-                self.oam_lock = false;
+                const remaining_hblank: i16 = 204 + final_dots;
+                const mode0_dots: u16 = @intCast(@max(@as(i16, 0), remaining_hblank));
 
-                if (self.stat.mode0_sel == 1) {
-                    self.interrupts.request(.lcd);
-                }
-
-                return;
+                return .{ .hblank = .{ .dots = @intCast(mode0_dots) } };
             }
         }
+        return null;
     }
 
     fn checkLycInterrupt(self: *Ppu) void {
-        self.stat.ly_eql_lyc = 1;
-        if (self.stat.lyc_sel == 1) {
-            self.interrupts.request(.lcd);
+        if (self.ly == self.lyc) {
+            self.stat.ly_eql_lyc = 1;
+            if (self.stat.lyc_sel == 1) {
+                self.interrupts.request(.lcd);
+            }
         } else {
             self.stat.ly_eql_lyc = 0;
         }
     }
 
-    fn tickHBlank(self: *Ppu, mode0_state: Mode0) void {
+    fn tickHBlank(self: *Ppu, mode0_state: *Mode0) ?ModeContext {
         mode0_state.dots_left -= 4;
 
-        if (mode0_state.dots_left > 0) return;
+        if (mode0_state.dots_left > 0) return null;
 
         self.ly += 1;
         self.checkLycInterrupt();
 
         if (self.ly == 144) {
-            self.state = .{ .mode1 = .{ .dots_left = 456 } };
-            if (self.stat.mode1_sel == 1) self.interrupts.request(.lcd);
-            self.interrupts.request(.vblank);
-            return;
+            return .{ .vblank = {} };
         }
 
-        self.stat.ppu_mode = 1;
-        self.state = .{ .mode2 = .{ .dots_left = 80 } };
-        if (self.stat.mode2_sel == 1) self.interrupts.request(.lcd);
+        return .{ .oam_scan = {} };
     }
 
-    fn tickVBlank(self: *Ppu, mode1_state: Mode1) void {
+    fn tickVBlank(self: *Ppu, mode1_state: *Mode1) ?ModeContext {
         mode1_state.dots_left -= 4;
-        if (mode1_state.dots_left > 0) return;
+        if (mode1_state.dots_left > 0) return null;
 
         self.ly += 1;
         self.checkLycInterrupt();
 
         if (self.ly > 153) {
-            self.state = .{ .mode2 = .{} };
-            self.stat.ppu_mode = 2;
-            self.vram_lock = true;
-            if (self.stat.mode2_sel == 1) self.interrupts.request(.lcd);
-            return;
+            self.frame_buf.clear();
+            return .{ .oam_scan = {} };
         }
+
         mode1_state.dots_left = 456; // restart!
+        return null;
+    }
+
+    fn drawPixel(self: *Ppu, pixel: u2, pallete: u8) void {
+        const shade_id: u2 = @truncate(pallete >> (@as(u3, pixel) * 2));
+        const pix = hw.Lcd.dmg_palette[shade_id];
+        std.debug.assert(self.frame_buf.len < hw.Lcd.area);
+        self.frame_buf.append(pix) catch unreachable;
     }
 };
 

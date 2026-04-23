@@ -1,6 +1,5 @@
-// TODO: I have literally zero clue how this is supposed to work, making it a stub for now.
-// This probably needs to wait until I have the interface conventions clearly defined.
 const std = @import("std");
+const builtin = @import("builtin");
 const interrupts = @import("interrupts");
 const Interrupts = interrupts.Interrupts;
 const LinearFifo = std.fifo.LinearFifo;
@@ -39,7 +38,9 @@ pub const Sdt = struct {
                 self.cycles_left -= 1;
                 if (self.cycles_left == 0) {
                     // self.fifo.writeItem(self.sb) catch {};
-                    std.debug.print("{c}", .{self.sb});
+                    if (builtin.os.tag != .freestanding) {
+                        std.debug.print("{c}", .{self.sb});
+                    }
                     self.sc.enable = 0;
                     self.interrupts.request(.serial);
                 }

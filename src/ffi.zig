@@ -1,15 +1,39 @@
 // Exposes the emulator interface to the C ABI
 // Can be used for WASM as well.
 const std = @import("std");
+const builtin = @import("builtin");
 const Emulator = @import("emulator.zig").Emulator;
 const Cpu = @import("cpu").Cpu;
 
 var emu_instance: ?*Emulator = null;
-const allocator = std.heap.page_allocator;
 
-export fn init_emulator(rom_ptr: [*]const u8, rom_size: usize) i32 {
-    const rom = rom_ptr[0..rom_size];
-    emu_instance = Emulator.init(allocator, rom) catch return 1;
+// Pre-allocate a 32MB heap buffer inside the WASM memory space
+var heap_buffer: [32 * 1024 * 1024]u8 = undefined;
+var fba = std.heap.FixedBufferAllocator.init(&heap_buffer);
+const allocator = if (builtin.os.tag == .freestanding) fba.allocator() else std.heap.page_allocator;
+
+// Dedicated 8MB area for ROM loading
+export var rom_buffer: [8 * 1024 * 1024]u8 = undefined;
+
+export fn get_rom_buffer_ptr() [*]u8 {
+    return &rom_buffer;
+}
+
+export fn init_emulator(rom_size: usize) i32 {
+    if (emu_instance) |e| {
+        e.deinit();
+        emu_instance = null;
+    }
+
+    if (rom_size > rom_buffer.len) return 1;
+    if (rom_size < 0x0150) return 2; // ROM too small for header
+
+    const rom = rom_buffer[0..rom_size];
+    emu_instance = Emulator.init(allocator, rom) catch |err| {
+        if (err == error.UnsupportedMbcType) return 3;
+        if (err == error.OutOfMemory) return 4;
+        return 5;
+    };
     return 0;
 }
 
@@ -26,6 +50,11 @@ export fn deinit_emulator() void {
 
 export fn step() void {
     if (emu_instance) |e| e.cpu.step();
+}
+
+// Expose display
+export fn get_frame_buffer_ptr() [*]u32 {
+    return if (emu_instance) |e| @ptrCast(&e.ppu.frame_buf) else undefined;
 }
 
 // Expose registers
@@ -62,22 +91,19 @@ export fn get_reg_sp() u16 {
 
 // Expose memory
 export fn get_vram_ptr() [*]u8 {
-    return if (emu_instance) |e| @ptrCast(&e.mmu.vram) else undefined;
+    return if (emu_instance) |e| @ptrCast(&e.ppu.vram) else undefined;
 }
-export fn get_wram_ptr() [*]u8 {
+export fn get_wram0_ptr() [*]u8 {
     return if (emu_instance) |e| @ptrCast(&e.mmu.wram0) else undefined;
+}
+export fn get_wram1_ptr() [*]u8 {
+    return if (emu_instance) |e| @ptrCast(&e.mmu.wram1) else undefined;
 }
 export fn get_hram_ptr() [*]u8 {
     return if (emu_instance) |e| @ptrCast(&e.mmu.hram) else undefined;
 }
-
-// Expose serial output
-export fn get_serial_len() usize {
-    return if (emu_instance) |e| e.sdt.fifo.readableLength() else 0;
-}
-
-export fn read_serial_byte() u8 {
-    return if (emu_instance) |e| e.sdt.fifo.readItem() orelse 0 else 0;
+export fn get_oam_ptr() [*]u8 {
+    return if (emu_instance) |e| @ptrCast(&e.ppu.oam) else undefined;
 }
 
 // Interrupt state
