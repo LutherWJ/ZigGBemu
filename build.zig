@@ -2,7 +2,7 @@ const std = @import("std");
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{});
+    const optimize = b.standardOptimizeOption(.{ .preferred_optimize_mode = .Debug });
 
     // 1. Define Internal Modules
     const ModuleDef = struct { name: []const u8, path: []const u8, mod: *std.Build.Module = undefined };

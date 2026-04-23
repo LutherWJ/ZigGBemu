@@ -34,9 +34,10 @@ pub const Io = struct {
             hw.Io.obp1 => self.ppu.obp1,
             hw.Io.wy => self.ppu.wy,
             hw.Io.wx => self.ppu.wx,
+            hw.Io.dma => self.ppu.dma,
             else => {
                 // std.debug.print("Attempted reading from unimplemented IO region at address: 0x{X}\n", .{address});
-                return 0;
+                return 0xFF;
             },
         };
     }
@@ -44,7 +45,7 @@ pub const Io = struct {
     pub fn write(self: *Io, address: u16, value: u8) void {
         switch (address) {
             hw.Io.joyp => self.joypad.write(value),
-            hw.Io.sb => self.sdt.writeSb(value), // ???
+            hw.Io.sb => self.sdt.writeSb(value),
             hw.Io.sc => self.sdt.writeSc(value),
             hw.Io.div => self.timer.writeDiv(),
             hw.Io.tima => self.timer.writeTima(value),
@@ -64,9 +65,9 @@ pub const Io = struct {
             hw.Io.wy => self.ppu.wy = value,
             hw.Io.wx => self.ppu.wx = value,
             else => {
-                if (@import("builtin").os.tag != .freestanding) {
-                    std.debug.print("[IO] Write to unimplemented address: 0x{X:0>4} = 0x{X:0>2}\n", .{ address, value });
-                }
+                // if (@import("builtin").os.tag != .freestanding) {
+                //     std.debug.print("[IO] Write to unimplemented address: 0x{X:0>4} = 0x{X:0>2}\n", .{ address, value });
+                // }
             },
         }
     }

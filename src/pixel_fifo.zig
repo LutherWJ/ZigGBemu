@@ -11,7 +11,7 @@ pub const BackgroundFifo = struct {
     buffer: [16]u2 = undefined,
     head: u4 = 0,
     tail: u4 = 0,
-    count: u4 = 0,
+    count: u8 = 0,
 
     pub fn pushRow(self: *BackgroundFifo, row: u16) PixelFifoError!void {
         inline for (0..8) |i| {
@@ -44,7 +44,7 @@ pub const SpriteFifo = struct {
     buffer: [8]SpritePixel = undefined,
     head: u3 = 0,
     tail: u3 = 0,
-    count: u4 = 0,
+    count: u8 = 0,
 
     pub fn pushRow(self: *SpriteFifo, row: [8]SpritePixel) void {
         for (row, 0..) |new_pixel, i| {

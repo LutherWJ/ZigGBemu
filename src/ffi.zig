@@ -1,39 +1,57 @@
 // Exposes the emulator interface to the C ABI
-// Can be used for WASM as well.
 const std = @import("std");
 const builtin = @import("builtin");
 const Emulator = @import("emulator.zig").Emulator;
 const Cpu = @import("cpu").Cpu;
 
+// Logging
+extern fn js_log_write(ptr: [*]const u8, len: usize) void;
+
+pub fn log(msg: []const u8) void {
+    js_log_write(msg.ptr, msg.len);
+}
+
+pub fn panic(msg: []const u8, _: ?*std.builtin.StackTrace, _: ?usize) noreturn {
+    log("PANIC: ");
+    log(msg);
+    @trap();
+}
+
 var emu_instance: ?*Emulator = null;
 
 // Pre-allocate a 32MB heap buffer inside the WASM memory space
-var heap_buffer: [32 * 1024 * 1024]u8 = undefined;
+var heap_buffer: [32 * 1024 * 1024]u8 align(4096) = undefined;
 var fba = std.heap.FixedBufferAllocator.init(&heap_buffer);
 const allocator = if (builtin.os.tag == .freestanding) fba.allocator() else std.heap.page_allocator;
 
 // Dedicated 8MB area for ROM loading
-export var rom_buffer: [8 * 1024 * 1024]u8 = undefined;
+export var rom_buffer: [8 * 1024 * 1024]u8 align(4096) = undefined;
 
 export fn get_rom_buffer_ptr() [*]u8 {
     return &rom_buffer;
 }
 
 export fn init_emulator(rom_size: usize) i32 {
+    log("INFO: init_emulator called");
     if (emu_instance) |e| {
         e.deinit();
         emu_instance = null;
     }
+
+    // Reset the allocator for a clean start
+    fba.reset();
 
     if (rom_size > rom_buffer.len) return 1;
     if (rom_size < 0x0150) return 2; // ROM too small for header
 
     const rom = rom_buffer[0..rom_size];
     emu_instance = Emulator.init(allocator, rom) catch |err| {
+        log("ERROR: Emulator initialization failed");
         if (err == error.UnsupportedMbcType) return 3;
         if (err == error.OutOfMemory) return 4;
         return 5;
     };
+    log("INFO: Emulator initialized successfully");
     return 0;
 }
 
@@ -54,7 +72,7 @@ export fn step() void {
 
 // Expose display
 export fn get_frame_buffer_ptr() [*]u32 {
-    return if (emu_instance) |e| @ptrCast(&e.ppu.frame_buf) else undefined;
+    return if (emu_instance) |e| @ptrCast(&e.ppu.frame_buf.buffer) else undefined;
 }
 
 // Expose registers
@@ -102,19 +120,17 @@ export fn get_wram1_ptr() [*]u8 {
 export fn get_hram_ptr() [*]u8 {
     return if (emu_instance) |e| @ptrCast(&e.mmu.hram) else undefined;
 }
-export fn get_oam_ptr() [*]u8 {
-    return if (emu_instance) |e| @ptrCast(&e.ppu.oam) else undefined;
-}
-
-// Interrupt state
 export fn get_ie() u8 {
     return if (emu_instance) |e| e.interrupts.ie else 0;
 }
 export fn get_if() u8 {
     return if (emu_instance) |e| e.interrupts.ifr else 0;
 }
+export fn get_oam_ptr() [*]u8 {
+    return if (emu_instance) |e| @ptrCast(&e.ppu.oam) else undefined;
+}
 
 // Whatever else
-export fn get_cpu_ptr() ?*Cpu {
-    return if (emu_instance) |e| e.cpu else null;
+export fn ping() void {
+    log("PONG: Connection to Zig confirmed.");
 }

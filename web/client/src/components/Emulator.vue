@@ -1,16 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue';
 import { useEmulator } from '../composables/useEmulator';
-import { useDisplay } from '../composables/useDisplay';
 
 const canvasRef = ref<HTMLCanvasElement | null>(null);
 const emulator = useEmulator();
-
-// Frame buffer is inside memory.frameBuffer
-const frameBuffer = computed(() => emulator.memory.value?.frameBuffer || null);
-
-// Initializing display with the worker
-const { render } = useDisplay(canvasRef, frameBuffer, emulator.worker);
 
 const handleFileUpload = (event: Event) => {
     const target = event.target as HTMLInputElement;
@@ -20,7 +13,14 @@ const handleFileUpload = (event: Event) => {
 };
 
 onMounted(() => {
-    emulator.init();
+    if (canvasRef.value) {
+        emulator.init(canvasRef.value);
+    }
+    emulator.onFrameReady(() => {
+        if (isRunning.value) {
+            animationId = requestAnimationFrame(loop);
+        }
+    });
 });
 
 const isRunning = ref(false);
@@ -40,7 +40,6 @@ const stop = () => {
 const loop = () => {
     if (!isRunning.value) return;
     emulator.runFrame();
-    animationId = requestAnimationFrame(loop);
 };
 </script>
 

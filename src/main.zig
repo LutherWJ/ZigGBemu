@@ -13,14 +13,15 @@ pub fn main() !void {
 }
 
 fn testRom(allocator: std.mem.Allocator) !void {
-    var args_iterator = try std.process.argsWithAllocator(allocator);
-    defer args_iterator.deinit();
+    //var args_iterator = try std.process.argsWithAllocator(allocator);
+    //defer args_iterator.deinit();
 
-    _ = args_iterator.next(); // skip exe name
-    const rom_path = args_iterator.next() orelse {
-        std.debug.print("Usage: ZigGBemu <path_to_rom>\n", .{});
-        return;
-    };
+    //_ = args_iterator.next(); // skip exe name
+    //const rom_path = args_iterator.next() orelse {
+    //    std.debug.print("Usage: ZigGBemu <path_to_rom>\n", .{});
+    //    return;
+    //};
+    const rom_path = "/home/luther/Projects/ziggbemu/gb-test-roms/halt_bug.gb";
 
     const file = try std.fs.cwd().openFile(rom_path, .{});
     defer file.close();

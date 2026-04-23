@@ -794,8 +794,8 @@ pub const Cpu = struct {
             self.halted = false;
             if (self.ime_state == .enabled) {
                 self.handleInterrupt(interrupt);
+                return;
             }
-            return;
         }
 
         if (self.ime_state == .enable_pending) self.ime_state = .enabled;

@@ -40,7 +40,7 @@ pub const Emulator = struct {
         emu.sdt.* = .{ .interrupts = emu.interrupts };
 
         emu.ppu = try aa.create(Ppu);
-        emu.ppu.init(emu.interrupts);
+        emu.ppu.* = .{ .interrupts = emu.interrupts };
 
         emu.timer = try aa.create(Timer);
         emu.timer.* = .{ .interrupts = emu.interrupts, .sdt = emu.sdt, .ppu = emu.ppu };
@@ -82,15 +82,20 @@ pub const Emulator = struct {
     }
 
     pub fn runFrame(self: *Emulator) void {
-        const starting_cycles: u16 = self.timer.counter;
         var cycles: u32 = 0;
-        const target: u32 = hw.Timings.cyclesPerFrame -% self._frame_sync;
+        const target: u32 = if (self._frame_sync >= hw.Timings.cyclesPerFrame)
+            0
+        else
+            hw.Timings.cyclesPerFrame - self._frame_sync;
+
         while (cycles < target) {
+            const prev_ticks = self.timer.counter;
             self.cpu.step();
-            cycles = self.timer.counter -% starting_cycles;
+            const delta = self.timer.counter -% prev_ticks;
+            cycles += delta;
         }
 
-        self._frame_sync = cycles -% target;
+        self._frame_sync = if (cycles > target) cycles - target else 0;
     }
 
     pub fn deinit(self: *Emulator) void {

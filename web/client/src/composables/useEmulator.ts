@@ -15,7 +15,8 @@ export interface EmulatorState {
   memory: Ref<EmulatorMemory | null>;
   error: Ref<string | null>;
   worker: Ref<Worker | null>;
-  init: () => Promise<void>;
+  onFrameReady: (cb: () => void) => void;
+  init: (canvas: HTMLCanvasElement) => Promise<void>;
   loadRom: (file: File) => Promise<void>;
   runFrame: () => void;
   step: () => void;
@@ -28,11 +29,15 @@ export function useEmulator(): EmulatorState {
   const error = ref<string | null>(null);
   const workerRef = shallowRef<Worker | null>(null);
   
-  let wasmExports: any = null;
   let sharedMemory: WebAssembly.Memory | null = null;
+  let romPtr: number = 0;
+  let frameReadyCallback: (() => void) | null = null;
 
-  const init = async () => {
+  const init = async (canvas: HTMLCanvasElement) => {
     try {
+      console.log("[MAIN] Initializing Emulator...");
+      const offscreen = canvas.transferControlToOffscreen();
+
       // 1. Create Shared Memory (64MB = 1024 pages)
       sharedMemory = new WebAssembly.Memory({
         initial: 1024,
@@ -54,14 +59,38 @@ export function useEmulator(): EmulatorState {
         const { type, data } = e.data;
         switch (type) {
           case 'READY':
+            console.log("[MAIN] Worker Ready. ROM Pointer:", data.romPtr);
             isLoaded.value = true;
+            romPtr = data.romPtr;
             break;
           case 'ROM_LOADED':
+            console.log("[MAIN] ROM Loaded. Mapping Pointers:", data);
             isRomLoaded.value = true;
-            refreshMemoryViews();
+            if (sharedMemory) {
+                const buffer = sharedMemory.buffer;
+                memory.value = {
+                    vram: new Uint8Array(buffer, data.vramPtr, 0x2000),
+                    wram0: new Uint8Array(buffer, data.wram0Ptr, 0x1000),
+                    wram1: new Uint8Array(buffer, data.wram1Ptr, 0x1000),
+                    hram: new Uint8Array(buffer, data.hramPtr, 0x7F),
+                    oam: new Uint8Array(buffer, data.oamPtr, 0xA0),
+                    frameBuffer: new Uint32Array(buffer, data.frameBufferPtr, 160 * 144),
+                };
+            }
+            break;
+          case 'FRAME_READY':
+            if (frameReadyCallback) frameReadyCallback();
             break;
           case 'ERROR':
+            console.error("[MAIN] Worker Error:", data);
             error.value = data;
+            break;
+          case 'ZIG_LOG':
+            console.log("[ZIG]", data);
+            break;
+          case 'ZIG_PANIC':
+            console.error("[ZIG PANIC]", data);
+            error.value = `Panic: ${data}`;
             break;
         }
       };
@@ -71,45 +100,28 @@ export function useEmulator(): EmulatorState {
         type: 'INIT',
         data: {
           module: wasmModule,
-          memory: sharedMemory
+          memory: sharedMemory,
+          canvas: offscreen
         }
-      });
-
-      // Instantiate on main thread for pointers
-      const instance = await WebAssembly.instantiate(wasmModule, {
-        env: { memory: sharedMemory }
-      });
-      wasmExports = instance.exports;
+      }, [offscreen]);
 
     } catch (e: any) {
-      console.error("Failed to load WASM/Worker:", e);
+      console.error("[MAIN] Failed to load WASM/Worker:", e);
       error.value = e.message;
     }
   };
 
-  const refreshMemoryViews = () => {
-    if (!wasmExports || !sharedMemory) return;
-    
-    const buffer = sharedMemory.buffer;
-    
-    memory.value = {
-      vram: new Uint8Array(buffer, wasmExports.get_vram_ptr(), 0x2000),
-      wram0: new Uint8Array(buffer, wasmExports.get_wram0_ptr(), 0x1000),
-      wram1: new Uint8Array(buffer, wasmExports.get_wram1_ptr(), 0x1000),
-      hram: new Uint8Array(buffer, wasmExports.get_hram_ptr(), 0x7F),
-      oam: new Uint8Array(buffer, wasmExports.get_oam_ptr(), 0xA0),
-      frameBuffer: new Uint32Array(buffer, wasmExports.get_frame_buffer_ptr(), 160 * 144),
-    };
-  };
-
   const loadRom = async (file: File) => {
-    if (!workerRef.value || !wasmExports || !sharedMemory) return;
+    if (!workerRef.value || !sharedMemory || !romPtr) {
+        console.error("[MAIN] Cannot load ROM: Worker or Memory not ready");
+        return;
+    }
 
     const buffer = await file.arrayBuffer();
     const romData = new Uint8Array(buffer);
 
-    const ptr = wasmExports.get_rom_buffer_ptr();
-    const wasmMemory = new Uint8Array(sharedMemory.buffer, ptr, romData.length);
+    console.log(`[MAIN] Loading ROM into buffer at 0x${romPtr.toString(16)}...`);
+    const wasmMemory = new Uint8Array(sharedMemory.buffer, romPtr, romData.length);
     wasmMemory.set(romData);
 
     workerRef.value.postMessage({
@@ -130,12 +142,17 @@ export function useEmulator(): EmulatorState {
     }
   };
 
+  const onFrameReady = (cb: () => void) => {
+    frameReadyCallback = cb;
+  };
+
   return {
     isLoaded,
     isRomLoaded,
     memory,
     error,
     worker: workerRef,
+    onFrameReady,
     init,
     loadRom,
     runFrame,
