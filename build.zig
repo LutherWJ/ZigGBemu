@@ -8,12 +8,12 @@ pub fn build(b: *std.Build) void {
     const ModuleDef = struct { name: []const u8, path: []const u8, mod: *std.Build.Module = undefined };
     var internal_modules = [_]ModuleDef{
         .{ .name = "hw", .path = "src/constants.zig" },
-        .{ .name = "mbc", .path = "src/mbc.zig" },
+        .{ .name = "mbc", .path = "src/mbc/mbc.zig" },
         .{ .name = "io", .path = "src/io.zig" },
         .{ .name = "mmu", .path = "src/mmu.zig" },
         .{ .name = "cpu", .path = "src/cpu.zig" },
-        .{ .name = "mbc0", .path = "src/mbc0.zig" },
-        .{ .name = "mbc1", .path = "src/mbc1.zig" },
+        .{ .name = "mbc0", .path = "src/mbc/mbc0.zig" },
+        .{ .name = "mbc1", .path = "src/mbc/mbc1.zig" },
         .{ .name = "header", .path = "src/header.zig" },
         .{ .name = "joypad", .path = "src/joypad.zig" },
         .{ .name = "timer", .path = "src/timer.zig" },

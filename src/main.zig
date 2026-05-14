@@ -1,5 +1,6 @@
 const std = @import("std");
-const Emulator = @import("emulator.zig").Emulator;
+const builtin = @import("builtin");
+const Emulator = @import("emulator").Emulator;
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -13,15 +14,7 @@ pub fn main() !void {
 }
 
 fn testRom(allocator: std.mem.Allocator) !void {
-    //var args_iterator = try std.process.argsWithAllocator(allocator);
-    //defer args_iterator.deinit();
-
-    //_ = args_iterator.next(); // skip exe name
-    //const rom_path = args_iterator.next() orelse {
-    //    std.debug.print("Usage: ZigGBemu <path_to_rom>\n", .{});
-    //    return;
-    //};
-    const rom_path = "/home/luther/Projects/ziggbemu/gb-test-roms/halt_bug.gb";
+    const rom_path = "/home/luther/Downloads/Tetris (Japan) (En)/Tetris (Japan) (En).gb";
 
     const file = try std.fs.cwd().openFile(rom_path, .{});
     defer file.close();
@@ -40,6 +33,6 @@ fn testRom(allocator: std.mem.Allocator) !void {
     // Simple infinite loop for now
     while (true) {
         emu.runFrame();
-        // In a real app we'd sync with VSync/Timer here
+        // VSync/Timer here soon
     }
 }

@@ -1,5 +1,4 @@
-// TODO: This 100% needs to be tested
-// TODO: Check how this is supposed to be initialized
+// TODO: mysterious framebuf buffer overflow when starting Tetris
 
 const std = @import("std");
 const Interrupts = @import("interrupts").Interrupts;
@@ -83,7 +82,7 @@ const Mode = enum(u2) {
 };
 
 const ModeContext = union(Mode) {
-    hblank: struct { dots: i16 },
+    hblank: struct { dots: i16 = 204 },
     vblank: void,
     oam_scan: void,
     pixel_transfer: struct { discards: u8 },
@@ -114,6 +113,7 @@ const PixelFetcherState = struct {
     pix_address: u16 = 0, // Base address of pixels being fetched.
     focused_obj_idx: ?u8 = 0, // Multiplexer sets this value when it discovers a sprite needs to be rendered.
     x_offset: u8 = 0,
+    fetcher_x: u8 = 0,
     win_tile_x: u5 = 0,
 };
 
@@ -132,8 +132,6 @@ pub const Ppu = struct {
     wx: u8 = 0,
     wy: u8 = 0,
     wlc: u8 = 0, // Window Line control
-
-    fetcher_state: PixelFetcherState = .{}, // State machine for pixel fetcher
 
     vram: [hw.Map.vram.size]u8 = [_]u8{0} ** hw.Map.vram.size,
     oam: [hw.Map.oam.size]u8 = [_]u8{0} ** hw.Map.oam.size,
@@ -186,6 +184,7 @@ pub const Ppu = struct {
     }
 
     pub fn tick(self: *Ppu) void {
+        if (self.lcdc.lcd_enable == 0) return;
         const transition = switch (self.state) {
             .mode0 => |*m| self.tickHBlank(m),
             .mode1 => |*m| self.tickVBlank(m),
@@ -213,12 +212,31 @@ pub const Ppu = struct {
         self.oam[address - hw.Map.oam.start] = value;
     }
 
+    pub fn writeLcdc(self: *Ppu, value: u8) void {
+        const before = self.lcdc.lcd_enable;
+        self.lcdc = @bitCast(value);
+        const after = self.lcdc.lcd_enable;
+        if (before != after) {
+            if (before == 1) {
+                self.setMode(.{ .hblank = .{} });
+                self.ly = 0;
+                self.frame_buf.clear();
+            } else {
+                self.setMode(.oam_scan);
+                self.bg_fifo.clear();
+                self.sprite_fifo.clear();
+                self.oam_buf.clear();
+                self.wlc = 0;
+            }
+        }
+    }
+
     pub fn readVram(self: *Ppu, address: u16) u8 {
-        return if (self.vram_lock) self.vram[address - hw.Map.vram.start] else 0xFF;
+        return if (!self.vram_lock) self.vram[address - hw.Map.vram.start] else 0xFF;
     }
 
     pub fn readOam(self: *Ppu, address: u16) u8 {
-        return if (self.oam_lock) self.oam[address - hw.Map.oam.start] else 0xFF;
+        return if (!self.oam_lock) self.oam[address - hw.Map.oam.start] else 0xFF;
     }
 
     fn getTileBaseAddress(self: *Ppu, tile_id: u8) u16 {
@@ -240,10 +258,11 @@ pub const Ppu = struct {
             .first_tick_bg => {
                 // Calculate tile ID
                 const map_y: u16 = (self.scy +% self.ly);
-                const map_x: u16 = (self.scx +% fetcher_state.x_offset);
-                const grid_y = map_y >> 3; // divide by 8
-                const grid_x = map_x >> 3;
-                const map_base_address: u16 = if (self.lcdc.bg_tile_map == 1) 0x9800 else 0x9c00;
+                const map_x: u16 = (self.scx +% fetcher_state.fetcher_x);
+                std.debug.assert(map_y <= 0xFF and map_x <= 0xFF);
+                const grid_y = map_y / 8;
+                const grid_x = map_x / 8;
+                const map_base_address: u16 = if (self.lcdc.bg_tile_map == 1) 0x9c00 else 0x9800;
                 const tile_map_address = map_base_address + (grid_y * 32) + grid_x;
                 const tile_id = self.vram[tile_map_address - hw.Map.vram.start];
 
@@ -260,7 +279,8 @@ pub const Ppu = struct {
                 const byte2 = self.vram[fetcher_state.pix_address + 1];
                 const pixels = interleaveBytes(byte1, byte2);
                 self.bg_fifo.pushRow(pixels) catch return;
-                self.fetcher_state.mode = .first_tick_bg;
+                fetcher_state.fetcher_x +%= 8;
+                fetcher_state.mode = .first_tick_bg;
             },
             .first_tick_sprt => {
                 // Calculate which row we're drawing.
@@ -308,7 +328,7 @@ pub const Ppu = struct {
             },
             .first_tick_win => {
                 // Logic is almost identical to bg but uses different registers
-                const map_base_address: u16 = if (self.lcdc.win_tile_map == 0) 0x9800 else 0x9c00;
+                const map_base_address: u16 = if (self.lcdc.win_tile_map == 1) 0x9c00 else 0x9800;
                 const y_offset: u16 = (self.wlc >> 3) * 32;
                 const x_offset: u16 = fetcher_state.win_tile_x;
                 const tile_map_address: u16 = map_base_address + y_offset + x_offset;
@@ -327,7 +347,7 @@ pub const Ppu = struct {
                 const pixels = interleaveBytes(byte1, byte2);
                 self.bg_fifo.pushRow(pixels) catch return;
                 fetcher_state.win_tile_x += 1;
-                self.fetcher_state.mode = .first_tick_win;
+                fetcher_state.mode = .first_tick_win;
             },
         }
     }
@@ -365,6 +385,7 @@ pub const Ppu = struct {
     // to focus in the oam_buf. Multiple sprites can have the same coordinates so we need
     // to be extremely careful to not fetch the same sprite more than once.
     fn checkForSprite(self: *Ppu, fetcher_state: *PixelFetcherState) void {
+        if (fetcher_state.mode == .first_tick_sprt) return;
         const obj_idx = fetcher_state.focused_obj_idx;
         for (0..self.oam_buf.len) |i| {
             const obj = self.oam_buf.get(i);
@@ -400,7 +421,7 @@ pub const Ppu = struct {
                 }
             }
 
-            const bg_pixel = self.bg_fifo.popPixel() catch return null;
+            const bg_pixel = self.bg_fifo.popPixel() catch break;
 
             // Check if pixels need to be discarded
             if (mode3.pixel_discards > 0) {

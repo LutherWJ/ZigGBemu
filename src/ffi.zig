@@ -1,8 +1,9 @@
 // Exposes the emulator interface to the C ABI
 const std = @import("std");
 const builtin = @import("builtin");
-const Emulator = @import("emulator.zig").Emulator;
+const Emulator = @import("emulator").Emulator;
 const Cpu = @import("cpu").Cpu;
+const joypad = @import("joypad");
 
 // Logging
 extern fn js_log_write(ptr: [*]const u8, len: usize) void;
@@ -70,12 +71,32 @@ export fn step() void {
     if (emu_instance) |e| e.cpu.step();
 }
 
+export fn set_button(button_id: u8, pressed: bool) void {
+    if (emu_instance) |e| {
+        const btn: joypad.Button = switch (button_id) {
+            0 => .a,
+            1 => .b,
+            2 => .select,
+            3 => .start,
+            4 => .right,
+            5 => .left,
+            6 => .up,
+            7 => .down,
+            else => return,
+        };
+        e.joypad.setButton(btn, pressed);
+    }
+}
+
 // Expose display
 export fn get_frame_buffer_ptr() [*]u32 {
     return if (emu_instance) |e| @ptrCast(&e.ppu.frame_buf.buffer) else undefined;
 }
 
 // Expose registers
+export fn get_clock() u16 {
+    return if (emu_instance) |e| e.timer.counter else 0;
+}
 export fn get_reg_a() u8 {
     return if (emu_instance) |e| e.cpu.a else 0;
 }
@@ -105,6 +126,31 @@ export fn get_reg_pc() u16 {
 }
 export fn get_reg_sp() u16 {
     return if (emu_instance) |e| e.cpu.sp else 0;
+}
+// Expose PPU registers
+export fn get_ppu_lcdc() u8 {
+    return if (emu_instance) |e| @bitCast(e.ppu.lcdc) else 0;
+}
+export fn get_ppu_stat() u8 {
+    return if (emu_instance) |e| @bitCast(e.ppu.stat) else 0;
+}
+export fn get_ppu_scy() u8 {
+    return if (emu_instance) |e| e.ppu.scy else 0;
+}
+export fn get_ppu_scx() u8 {
+    return if (emu_instance) |e| e.ppu.scx else 0;
+}
+export fn get_ppu_ly() u8 {
+    return if (emu_instance) |e| e.ppu.ly else 0;
+}
+export fn get_ppu_lyc() u8 {
+    return if (emu_instance) |e| e.ppu.lyc else 0;
+}
+export fn get_ppu_wx() u8 {
+    return if (emu_instance) |e| e.ppu.wx else 0;
+}
+export fn get_ppu_wy() u8 {
+    return if (emu_instance) |e| e.ppu.wy else 0;
 }
 
 // Expose memory

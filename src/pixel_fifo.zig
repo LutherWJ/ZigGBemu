@@ -15,7 +15,7 @@ pub const BackgroundFifo = struct {
 
     pub fn pushRow(self: *BackgroundFifo, row: u16) PixelFifoError!void {
         inline for (0..8) |i| {
-            const shift = i * 2;
+            const shift = @as(u4, 7 - i) * 2;
             const pixel: u2 = @truncate(row >> shift);
 
             if (self.count + 8 > self.buffer.len) return PixelFifoError.BufferFull;

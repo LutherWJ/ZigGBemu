@@ -85,6 +85,12 @@ self.onmessage = async (e: MessageEvent) => {
             }
             break;
 
+        case 'SET_BUTTON':
+            if (wasm) {
+                wasm.set_button(data.id, data.pressed);
+            }
+            break;
+
         case 'RUN_FRAME':
             if (!wasm || !ctx || !imageData || !memory) return;
             wasm.run_frame();
@@ -92,30 +98,70 @@ self.onmessage = async (e: MessageEvent) => {
             const ptr = wasm.get_frame_buffer_ptr();
             const source = new Uint8Array(memory.buffer, ptr, 160 * 144 * 4);
 
-            // Check if buffer has any data
-            let hasData = false;
-            for (let i = 0; i < 400; i++) {
-                if (source[i] !== 0) {
-                    hasData = true;
-                    break;
-                }
-            }
-            if (hasData) {
-                console.log("[WORKER] Frame ready with data. First 16 bytes:", source.slice(0, 16));
-            } else {
-                console.log("[WORKER] Frame ready but empty (all zeros).");
-            }
-
             imageData.data.set(source);
             ctx.putImageData(imageData, 0, 0);
 
-            self.postMessage({ type: 'FRAME_READY' });
+            self.postMessage({ 
+                type: 'FRAME_READY',
+                data: {
+                    clock: wasm.get_clock(),
+                    registers: {
+                        pc: wasm.get_reg_pc(),
+                        sp: wasm.get_reg_sp(),
+                        a: wasm.get_reg_a(),
+                        f: wasm.get_reg_f(),
+                        b: wasm.get_reg_b(),
+                        c: wasm.get_reg_c(),
+                        d: wasm.get_reg_d(),
+                        e: wasm.get_reg_e(),
+                        h: wasm.get_reg_h(),
+                        l: wasm.get_reg_l(),
+                    },
+                    ppu: {
+                        lcdc: wasm.get_ppu_lcdc(),
+                        stat: wasm.get_ppu_stat(),
+                        scy: wasm.get_ppu_scy(),
+                        scx: wasm.get_ppu_scx(),
+                        ly: wasm.get_ppu_ly(),
+                        lyc: wasm.get_ppu_lyc(),
+                        wx: wasm.get_ppu_wx(),
+                        wy: wasm.get_ppu_wy(),
+                    }
+                }
+            });
             break;
 
         case 'STEP':
             if (!wasm) return;
             wasm.step();
-            self.postMessage({ type: 'STEP_COMPLETE' });
+            self.postMessage({ 
+                type: 'STEP_COMPLETE',
+                data: {
+                    clock: wasm.get_clock(),
+                    registers: {
+                        pc: wasm.get_reg_pc(),
+                        sp: wasm.get_reg_sp(),
+                        a: wasm.get_reg_a(),
+                        f: wasm.get_reg_f(),
+                        b: wasm.get_reg_b(),
+                        c: wasm.get_reg_c(),
+                        d: wasm.get_reg_d(),
+                        e: wasm.get_reg_e(),
+                        h: wasm.get_reg_h(),
+                        l: wasm.get_reg_l(),
+                    },
+                    ppu: {
+                        lcdc: wasm.get_ppu_lcdc(),
+                        stat: wasm.get_ppu_stat(),
+                        scy: wasm.get_ppu_scy(),
+                        scx: wasm.get_ppu_scx(),
+                        ly: wasm.get_ppu_ly(),
+                        lyc: wasm.get_ppu_lyc(),
+                        wx: wasm.get_ppu_wx(),
+                        wy: wasm.get_ppu_wy(),
+                    }
+                }
+            });
             break;
     }
 };

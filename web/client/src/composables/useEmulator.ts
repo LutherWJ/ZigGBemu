@@ -9,24 +9,61 @@ export interface EmulatorMemory {
   frameBuffer: Uint32Array;
 }
 
+export interface EmulatorRegisters {
+  pc: number;
+  sp: number;
+  a: number;
+  f: number;
+  b: number;
+  c: number;
+  d: number;
+  e: number;
+  h: number;
+  l: number;
+}
+
+export interface PpuState {
+  lcdc: number;
+  stat: number;
+  scy: number;
+  scx: number;
+  ly: number;
+  lyc: number;
+  wx: number;
+  wy: number;
+}
+
 export interface EmulatorState {
   isLoaded: Ref<boolean>;
   isRomLoaded: Ref<boolean>;
   memory: Ref<EmulatorMemory | null>;
+  registers: Ref<EmulatorRegisters>;
+  ppu: Ref<PpuState>;
+  clock: Ref<number>;
   error: Ref<string | null>;
+  refreshTrigger: Ref<number>;
   worker: Ref<Worker | null>;
   onFrameReady: (cb: () => void) => void;
   init: (canvas: HTMLCanvasElement) => Promise<void>;
   loadRom: (file: File) => Promise<void>;
   runFrame: () => void;
   step: () => void;
+  setButton: (id: number, pressed: boolean) => void;
 }
 
 export function useEmulator(): EmulatorState {
   const isLoaded = ref(false);
   const isRomLoaded = ref(false);
   const memory = shallowRef<EmulatorMemory | null>(null);
+  const registers = ref<EmulatorRegisters>({
+    pc: 0, sp: 0, a: 0, f: 0, b: 0, c: 0, d: 0, e: 0, h: 0, l: 0
+  });
+  const ppu = ref<PpuState>({
+    lcdc: 0, stat: 0, scy: 0, scx: 0, ly: 0, lyc: 0, wx: 0, wy: 0
+  });
+  const clock = ref(0);
   const error = ref<string | null>(null);
+  const refreshTrigger = ref(0);
   const workerRef = shallowRef<Worker | null>(null);
   
   let sharedMemory: WebAssembly.Memory | null = null;
@@ -79,7 +116,18 @@ export function useEmulator(): EmulatorState {
             }
             break;
           case 'FRAME_READY':
+            if (data) {
+                if (data.registers) registers.value = data.registers;
+                if (data.ppu) ppu.value = data.ppu;
+                if (data.clock !== undefined) clock.value = data.clock;
+            }
             if (frameReadyCallback) frameReadyCallback();
+            break;
+          case 'STEP_COMPLETE':
+            if (data.registers) registers.value = data.registers;
+            if (data.ppu) ppu.value = data.ppu;
+            if (data.clock !== undefined) clock.value = data.clock;
+            refreshTrigger.value++;
             break;
           case 'ERROR':
             console.error("[MAIN] Worker Error:", data);
@@ -142,6 +190,12 @@ export function useEmulator(): EmulatorState {
     }
   };
 
+  const setButton = (id: number, pressed: boolean) => {
+    if (workerRef.value) {
+      workerRef.value.postMessage({ type: 'SET_BUTTON', data: { id, pressed } });
+    }
+  };
+
   const onFrameReady = (cb: () => void) => {
     frameReadyCallback = cb;
   };
@@ -150,12 +204,17 @@ export function useEmulator(): EmulatorState {
     isLoaded,
     isRomLoaded,
     memory,
+    registers,
+    ppu,
+    clock,
     error,
     worker: workerRef,
     onFrameReady,
     init,
     loadRom,
     runFrame,
-    step
+    step,
+    setButton,
+    refreshTrigger
   };
 }

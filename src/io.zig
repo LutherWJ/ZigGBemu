@@ -52,7 +52,7 @@ pub const Io = struct {
             hw.Io.tma => self.timer.writeTma(value),
             hw.Io.tac => self.timer.writeTac(value),
             hw.Io.if_reg => self.interrupts.ifr = value,
-            hw.Io.lcdc => self.ppu.lcdc = @bitCast(value),
+            hw.Io.lcdc => self.ppu.writeLcdc(value),
             hw.Io.stat => self.ppu.stat = @bitCast(value),
             hw.Io.scy => self.ppu.scy = value,
             hw.Io.scx => self.ppu.scx = value,

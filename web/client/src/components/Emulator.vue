@@ -1,9 +1,14 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted } from 'vue';
 import { useEmulator } from '../composables/useEmulator';
+import { useJoypad } from '../composables/useJoypad';
+import MemoryViewer from './MemoryViewer.vue';
+import RegisterViewer from './RegisterViewer.vue';
+import PpuViewer from './PpuViewer.vue';
 
 const canvasRef = ref<HTMLCanvasElement | null>(null);
 const emulator = useEmulator();
+useJoypad(emulator);
 
 const handleFileUpload = (event: Event) => {
     const target = event.target as HTMLInputElement;
@@ -35,6 +40,12 @@ const start = () => {
 const stop = () => {
     isRunning.value = false;
     if (animationId) cancelAnimationFrame(animationId);
+    emulator.refreshTrigger.value++;
+};
+
+const step = () => {
+    if (isRunning.value) return;
+    emulator.step();
 };
 
 const loop = () => {
@@ -45,21 +56,42 @@ const loop = () => {
 
 <template>
     <div class="emulator-container">
-        <div class="controls">
-            <input type="file" @change="handleFileUpload" accept=".gb,.gbc,.bin" />
-            <button @click="start" :disabled="!emulator.isRomLoaded.value || isRunning">Run</button>
-            <button @click="stop" :disabled="!isRunning">Stop</button>
-            <span v-if="!emulator.isLoaded.value">Loading WASM...</span>
-            <span v-else-if="emulator.isRomLoaded.value">ROM Loaded!</span>
-            <span v-else>Ready for ROM.</span>
-        </div>
+        <div class="main-layout">
+            <div class="emu-col">
+                <div class="controls">
+                    <input type="file" @change="handleFileUpload" accept=".gb,.gbc,.bin" />
+                    <button @click="start" :disabled="!emulator.isRomLoaded.value || isRunning">Run</button>
+                    <button @click="stop" :disabled="!isRunning">Stop</button>
+                    <button @click="step" :disabled="!emulator.isRomLoaded.value || isRunning">Step</button>
+                    <span v-if="!emulator.isLoaded.value">Loading WASM...</span>
+                    <span v-else-if="emulator.isRomLoaded.value">ROM Loaded</span>
+                    <span v-else>Ready for ROM.</span>
+                </div>
 
-        <div class="display">
-            <canvas ref="canvasRef" width="160" height="144"></canvas>
-        </div>
+                <div class="display">
+                    <canvas ref="canvasRef" width="160" height="144"></canvas>
+                </div>
 
-        <div v-if="emulator.error.value" class="error">
-            Error: {{ emulator.error.value }}
+                <div v-if="emulator.error.value" class="error">
+                    Error: {{ emulator.error.value }}
+                </div>
+            </div>
+
+            <div class="side-col">
+                <RegisterViewer 
+                    :registers="emulator.registers.value" 
+                    :clock="emulator.clock.value" 
+                    :refresh-trigger="emulator.refreshTrigger.value"
+                />
+                <PpuViewer
+                    :ppu="emulator.ppu.value"
+                    :refresh-trigger="emulator.refreshTrigger.value"
+                />
+                <MemoryViewer 
+                    :memory="emulator.memory.value" 
+                    :refresh-trigger="emulator.refreshTrigger.value" 
+                />
+            </div>
         </div>
     </div>
 </template>
@@ -71,6 +103,19 @@ const loop = () => {
     align-items: center;
     gap: 1rem;
     padding: 2rem;
+}
+
+.main-layout {
+    display: flex;
+    gap: 2rem;
+    align-items: flex-start;
+}
+
+.emu-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
 }
 
 .controls {
@@ -95,5 +140,12 @@ canvas {
     background: #fee;
     padding: 0.5rem;
     border-radius: 4px;
+}
+
+.side-col {
+    min-width: 450px;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
 }
 </style>

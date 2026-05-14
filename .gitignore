@@ -10,3 +10,4 @@ GEMINI.md
 node_modules/
 .env
 dist/
+public/
