@@ -5,6 +5,7 @@ import { useJoypad } from '../composables/useJoypad';
 import MemoryViewer from './MemoryViewer.vue';
 import RegisterViewer from './RegisterViewer.vue';
 import PpuViewer from './PpuViewer.vue';
+import JoypadViewer from './JoypadViewer.vue';
 
 const canvasRef = ref<HTMLCanvasElement | null>(null);
 const emulator = useEmulator();
@@ -78,6 +79,7 @@ const loop = () => {
             </div>
 
             <div class="side-col">
+                <JoypadViewer :state="emulator.joypad.value" />
                 <RegisterViewer 
                     :registers="emulator.registers.value" 
                     :clock="emulator.clock.value" 

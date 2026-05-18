@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const Timer = @import("timer").Timer;
 const Joypad = @import("joypad").Joypad;
 const hw = @import("hw");
@@ -36,7 +37,7 @@ pub const Io = struct {
             hw.Io.wx => self.ppu.wx,
             hw.Io.dma => self.ppu.dma,
             else => {
-                // std.debug.print("Attempted reading from unimplemented IO region at address: 0x{X}\n", .{address});
+                if (builtin.os.tag != .freestanding) std.debug.print("Attempted reading from unimplemented IO region at address: 0x{X}\n", .{address});
                 return 0xFF;
             },
         };
@@ -56,7 +57,7 @@ pub const Io = struct {
             hw.Io.stat => self.ppu.stat = @bitCast(value),
             hw.Io.scy => self.ppu.scy = value,
             hw.Io.scx => self.ppu.scx = value,
-            hw.Io.ly => self.ppu.ly = value,
+            hw.Io.ly => {},
             hw.Io.lyc => self.ppu.lyc = value,
             hw.Io.dma => self.ppu.writeDma(value),
             hw.Io.bgp => self.ppu.bgp = value,

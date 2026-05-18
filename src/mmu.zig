@@ -18,26 +18,26 @@ pub const Mmu = struct {
     mbc: *Mbc,
     ppu: *Ppu,
 
-    pub fn read(self: *const Mmu, address: u16, comptime T: type) T {
+    pub fn read(self: *const Mmu, address: u16, comptime T: type, comptime tick: bool) T {
         return switch (T) {
-            u8 => self.readU8(address),
-            u16 => self.readU16(address),
+            u8 => self.readU8(address, tick),
+            u16 => self.readU16(address, tick),
             else => @compileError("Mmu.read only supports u8 and u16 types"),
         };
     }
 
-    pub fn write(self: *Mmu, address: u16, value: anytype) void {
+    pub fn write(self: *Mmu, address: u16, value: anytype, comptime tick: bool) void {
         const T = @TypeOf(value);
         if (T == u8 or T == comptime_int) {
             const val: u8 = @truncate(value);
-            self.timer.tick();
+            if (tick) self.timer.tick();
             switch (address) {
                 hw.Map.rom0.start...hw.Map.romx.end => self.mbc.write(address, val),
                 hw.Map.vram.start...hw.Map.vram.end => self.ppu.writeVram(address, val),
                 hw.Map.ext_ram.start...hw.Map.ext_ram.end => self.mbc.write(address, val),
                 hw.Map.wram0.start...hw.Map.wram0.end => self.wram0[address - hw.Map.wram0.start] = val,
                 hw.Map.wramx.start...hw.Map.wramx.end => self.wram1[address - hw.Map.wramx.start] = val,
-                hw.Map.echo.start...hw.Map.echo.end => self.write(address - 0x2000, val),
+                hw.Map.echo.start...hw.Map.echo.end => self.write(address - 0x2000, val, tick),
                 hw.Map.oam.start...hw.Map.oam.end => self.ppu.writeOam(address, val),
                 hw.Map.io.start...hw.Map.io.end => self.io.write(address, val),
                 hw.Map.hram.start...hw.Map.hram.end => self.hram[address - hw.Map.hram.start] = val,
@@ -49,25 +49,10 @@ pub const Mmu = struct {
                 },
             }
         } else if (T == u16) {
-            self.write(address, @as(u8, @truncate(value)));
-            self.write(address + 1, @as(u8, @truncate(value >> 8)));
+            self.write(address, @as(u8, @truncate(value)), tick);
+            self.write(address + 1, @as(u8, @truncate(value >> 8)), tick);
         } else {
             @compileError("Memory.write only supports u8, 16 and comptime_int");
-        }
-    }
-
-    /// Used to initialize memory at boot time without ticking the timer
-    /// Only supports memory regions written to at boot time.
-    pub fn bootWrite(self: *Mmu, address: u16, value: u8) void {
-        switch (address) {
-            hw.Map.vram.start...hw.Map.vram.end => self.ppu.vram[address - hw.Map.vram.start] = value,
-            hw.Map.wram0.start...hw.Map.wram0.end => self.wram0[address - hw.Map.wram0.start] = value,
-            hw.Map.wramx.start...hw.Map.wramx.end => self.wram1[address - hw.Map.wramx.start] = value,
-            hw.Map.oam.start...hw.Map.oam.end => self.ppu.oam[address - hw.Map.oam.start] = value,
-            hw.Map.io.start...hw.Map.io.end => self.io.write(address, value),
-            hw.Map.hram.start...hw.Map.hram.end => self.hram[address - hw.Map.hram.start] = value,
-            hw.Map.ie_reg => self.interrupts.ie = value,
-            else => unreachable,
         }
     }
 
@@ -76,15 +61,15 @@ pub const Mmu = struct {
         return (joypad & 0x0F) != 0x0F;
     }
 
-    fn readU8(self: *const Mmu, address: u16) u8 {
-        self.timer.tick();
+    fn readU8(self: *const Mmu, address: u16, comptime tick: bool) u8 {
+        if (tick) self.timer.tick();
         return switch (address) {
             hw.Map.rom0.start...hw.Map.romx.end => self.mbc.read(address),
             hw.Map.vram.start...hw.Map.vram.end => self.ppu.readVram(address),
             hw.Map.ext_ram.start...hw.Map.ext_ram.end => self.mbc.read(address),
             hw.Map.wram0.start...hw.Map.wram0.end => self.wram0[address - hw.Map.wram0.start],
             hw.Map.wramx.start...hw.Map.wramx.end => self.wram1[address - hw.Map.wramx.start],
-            hw.Map.echo.start...hw.Map.echo.end => self.readU8(address - 0x2000),
+            hw.Map.echo.start...hw.Map.echo.end => self.readU8(address - 0x2000, tick),
             hw.Map.oam.start...hw.Map.oam.end => self.ppu.readOam(address),
             hw.Map.unusable.start...hw.Map.unusable.end => 0xFF,
             hw.Map.io.start...hw.Map.io.end => self.io.read(address),
@@ -93,9 +78,9 @@ pub const Mmu = struct {
         };
     }
 
-    fn readU16(self: *const Mmu, address: u16) u16 {
-        const low = self.readU8(address);
-        const high = self.readU8(address + 1);
+    fn readU16(self: *const Mmu, address: u16, comptime tick: bool) u16 {
+        const low = self.readU8(address, tick);
+        const high = self.readU8(address + 1, tick);
         return (@as(u16, high) << 8) | low;
     }
 };

@@ -258,7 +258,7 @@ fn run_test(cpu: *Cpu, mem: []const u8, steps: u16) void {
     cpu.pc = hw.Map.wram0.start;
 
     while (i < mem.len) : (i += 1) {
-        cpu.mmu.write(start_address + i, mem[i]);
+        cpu.mmu.write(start_address + i, mem[i], true);
     }
 
     i = 0;

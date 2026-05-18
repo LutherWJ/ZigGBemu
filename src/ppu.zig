@@ -1,5 +1,3 @@
-// TODO: mysterious framebuf buffer overflow when starting Tetris
-
 const std = @import("std");
 const Interrupts = @import("interrupts").Interrupts;
 const hw = @import("hw");
@@ -74,11 +72,18 @@ const Mode3 = struct {
     fetcher_state: PixelFetcherState = .{},
 };
 
-const Mode = enum(u2) {
+const DmaTransfer = struct {
+    dots_left: i16 = 640,
+    transfer_base_address: u16,
+    address_offset: u16 = 0,
+};
+
+const Mode = enum(u3) {
     hblank = 0,
     vblank = 1,
     oam_scan = 2,
     pixel_transfer = 3,
+    dma_transfer = 4,
 };
 
 const ModeContext = union(Mode) {
@@ -86,6 +91,7 @@ const ModeContext = union(Mode) {
     vblank: void,
     oam_scan: void,
     pixel_transfer: struct { discards: u8 },
+    dma_transfer: struct { transfer_base_address: u16 },
 };
 
 const PpuState = union(enum) {
@@ -93,6 +99,7 @@ const PpuState = union(enum) {
     mode1: Mode1,
     mode2: Mode2,
     mode3: Mode3,
+    dma_transfer: DmaTransfer,
 };
 
 const FetcherModes = enum {
@@ -147,6 +154,8 @@ pub const Ppu = struct {
     fn setMode(self: *Ppu, context: ModeContext) void {
         switch (context) {
             .hblank => |ctx| {
+                self.bg_fifo.clear();
+                self.sprite_fifo.clear();
                 self.state = .{ .mode0 = .{ .dots_left = ctx.dots } };
                 self.stat.ppu_mode = 0;
                 self.vram_lock = false;
@@ -180,6 +189,15 @@ pub const Ppu = struct {
                 self.vram_lock = true;
                 self.oam_lock = true;
             },
+            .dma_transfer => |ctx| {
+                self.bg_fifo.clear();
+                self.sprite_fifo.clear();
+                self.stat.ppu_mode = 0;
+                self.vram_lock = false;
+                self.oam_lock = false;
+                self.state = .{ .dma_transfer = .{ .transfer_base_address = ctx.transfer_base_address } };
+                if (self.stat.mode0_sel == 1) self.interrupts.request(.lcd);
+            },
         }
     }
 
@@ -189,7 +207,8 @@ pub const Ppu = struct {
             .mode0 => |*m| self.tickHBlank(m),
             .mode1 => |*m| self.tickVBlank(m),
             .mode2 => |*m| self.oamScanTick(m),
-            .mode3 => |*m| self.pixelTransferTick(m),
+            .mode3 => |*m| self.tickPixelTransfer(m),
+            .dma_transfer => |*m| self.tickDmaTransfer(m),
         };
 
         if (transition) |ctx| {
@@ -198,8 +217,9 @@ pub const Ppu = struct {
     }
 
     pub fn writeDma(self: *Ppu, value: u8) void {
-        self.setMode(.{ .oam_scan = {} });
         self.dma = value;
+        const transfer_base_address = @as(u16, value) << 8;
+        self.setMode(.{ .dma_transfer = .{ .transfer_base_address = transfer_base_address } });
     }
 
     pub fn writeVram(self: *Ppu, address: u16, value: u8) void {
@@ -223,8 +243,6 @@ pub const Ppu = struct {
                 self.frame_buf.clear();
             } else {
                 self.setMode(.oam_scan);
-                self.bg_fifo.clear();
-                self.sprite_fifo.clear();
                 self.oam_buf.clear();
                 self.wlc = 0;
             }
@@ -399,7 +417,7 @@ pub const Ppu = struct {
         }
     }
 
-    fn pixelTransferTick(self: *Ppu, mode3: *Mode3) ?ModeContext {
+    fn tickPixelTransfer(self: *Ppu, mode3: *Mode3) ?ModeContext {
         mode3.dots_left -= 4;
         self.fetchTile(&mode3.fetcher_state);
 
@@ -449,9 +467,6 @@ pub const Ppu = struct {
                 if (final_mode == .first_tick_win or final_mode == .second_tick_win) {
                     self.wlc += 1;
                 }
-
-                self.bg_fifo.clear();
-                self.sprite_fifo.clear();
 
                 // TODO: The fetcher warmup stage is not long enough so mode3 always finishes 8
                 // dots early, fortunately the code accounts for this so we'll just comment it out
@@ -509,9 +524,22 @@ pub const Ppu = struct {
         return null;
     }
 
+    fn tickDmaTransfer(self: *Ppu, dma_transfer_state: *DmaTransfer) ?ModeContext {
+        dma_transfer_state.dots_left -= 4;
+
+        _ = self;
+
+        if (dma_transfer_state.dots_left == 0) {
+            return .oam_scan;
+        }
+        return null;
+    }
+
     fn drawPixel(self: *Ppu, pixel: u2, pallete: u8) void {
         const shade_id: u2 = @truncate(pallete >> (@as(u3, pixel) * 2));
         const pix = hw.Lcd.dmg_palette[shade_id];
+        std.debug.assert(self.ly < 144);
+        std.debug.assert(self.frame_buf.len < @as(usize, self.ly + 1) * 160);
         std.debug.assert(self.frame_buf.len < hw.Lcd.area);
         self.frame_buf.append(pix) catch unreachable;
     }

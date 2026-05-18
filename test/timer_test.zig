@@ -3,9 +3,10 @@ const testing = std.testing;
 const Timer = @import("timer").Timer;
 const Interrupts = @import("interrupts").Interrupts;
 const Sdt = @import("sdt").Sdt;
+const Ppu = @import("ppu").Ppu;
 const hw = @import("hw");
 
-fn setup() !struct { arena: std.heap.ArenaAllocator, timer: *Timer, interrupts: *Interrupts, sdt: *Sdt } {
+fn setup() !struct { arena: std.heap.ArenaAllocator, timer: *Timer, interrupts: *Interrupts, sdt: *Sdt, ppu: *Ppu } {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     errdefer arena.deinit();
     const aa = arena.allocator();
@@ -19,13 +20,17 @@ fn setup() !struct { arena: std.heap.ArenaAllocator, timer: *Timer, interrupts: 
     const sdt = try aa.create(Sdt);
     sdt.* = .{ .interrupts = interrupts };
 
+    const ppu = try aa.create(Ppu);
+    ppu.* = .{ .interrupts = interrupts };
+
     const timer = try aa.create(Timer);
     timer.* = .{
         .interrupts = interrupts,
         .sdt = sdt,
+        .ppu = ppu,
     };
 
-    return .{ .arena = arena, .timer = timer, .interrupts = interrupts, .sdt = sdt };
+    return .{ .arena = arena, .timer = timer, .interrupts = interrupts, .sdt = sdt, .ppu = ppu };
 }
 
 fn tick(timer: *Timer, cycles: usize) void {

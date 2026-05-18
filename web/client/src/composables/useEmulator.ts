@@ -40,6 +40,7 @@ export interface EmulatorState {
   registers: Ref<EmulatorRegisters>;
   ppu: Ref<PpuState>;
   clock: Ref<number>;
+  joypad: Ref<number>;
   error: Ref<string | null>;
   refreshTrigger: Ref<number>;
   worker: Ref<Worker | null>;
@@ -62,6 +63,7 @@ export function useEmulator(): EmulatorState {
     lcdc: 0, stat: 0, scy: 0, scx: 0, ly: 0, lyc: 0, wx: 0, wy: 0
   });
   const clock = ref(0);
+  const joypad = ref(0);
   const error = ref<string | null>(null);
   const refreshTrigger = ref(0);
   const workerRef = shallowRef<Worker | null>(null);
@@ -120,6 +122,7 @@ export function useEmulator(): EmulatorState {
                 if (data.registers) registers.value = data.registers;
                 if (data.ppu) ppu.value = data.ppu;
                 if (data.clock !== undefined) clock.value = data.clock;
+                if (data.joypad !== undefined) joypad.value = data.joypad;
             }
             if (frameReadyCallback) frameReadyCallback();
             break;
@@ -127,6 +130,7 @@ export function useEmulator(): EmulatorState {
             if (data.registers) registers.value = data.registers;
             if (data.ppu) ppu.value = data.ppu;
             if (data.clock !== undefined) clock.value = data.clock;
+            if (data.joypad !== undefined) joypad.value = data.joypad;
             refreshTrigger.value++;
             break;
           case 'ERROR':
@@ -207,6 +211,7 @@ export function useEmulator(): EmulatorState {
     registers,
     ppu,
     clock,
+    joypad,
     error,
     worker: workerRef,
     onFrameReady,

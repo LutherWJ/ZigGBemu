@@ -105,6 +105,7 @@ self.onmessage = async (e: MessageEvent) => {
                 type: 'FRAME_READY',
                 data: {
                     clock: wasm.get_clock(),
+                    joypad: wasm.get_joypad_state(),
                     registers: {
                         pc: wasm.get_reg_pc(),
                         sp: wasm.get_reg_sp(),
@@ -138,6 +139,7 @@ self.onmessage = async (e: MessageEvent) => {
                 type: 'STEP_COMPLETE',
                 data: {
                     clock: wasm.get_clock(),
+                    joypad: wasm.get_joypad_state(),
                     registers: {
                         pc: wasm.get_reg_pc(),
                         sp: wasm.get_reg_sp(),

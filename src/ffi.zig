@@ -97,6 +97,21 @@ export fn get_frame_buffer_ptr() [*]u32 {
 export fn get_clock() u16 {
     return if (emu_instance) |e| e.timer.counter else 0;
 }
+export fn get_joypad_state() u8 {
+    if (emu_instance) |e| {
+        var state: u8 = 0;
+        if (e.joypad.a) state |= (1 << 0);
+        if (e.joypad.b) state |= (1 << 1);
+        if (e.joypad.select) state |= (1 << 2);
+        if (e.joypad.start) state |= (1 << 3);
+        if (e.joypad.right) state |= (1 << 4);
+        if (e.joypad.left) state |= (1 << 5);
+        if (e.joypad.up) state |= (1 << 6);
+        if (e.joypad.down) state |= (1 << 7);
+        return state;
+    }
+    return 0;
+}
 export fn get_reg_a() u8 {
     return if (emu_instance) |e| e.cpu.a else 0;
 }
