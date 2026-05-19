@@ -2,6 +2,11 @@ const std = @import("std");
 const builtin = @import("builtin");
 const Emulator = @import("emulator").Emulator;
 
+pub fn panic(msg: []const u8, _: ?*std.builtin.StackTrace, _: ?usize) noreturn {
+    std.debug.print("\n FATAL ERROR:\n{s}\n", .{msg});
+    std.process.exit(1);
+}
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer {
@@ -28,11 +33,22 @@ fn testRom(allocator: std.mem.Allocator) !void {
     const emu = try Emulator.init(allocator, rom_buf);
     defer emu.deinit();
 
-    std.debug.print("Starting emulation of {s}...\n", .{rom_path});
+    std.debug.print("Starting emulation of {s}...\n\n\n", .{rom_path});
 
-    // Simple infinite loop for now
-    while (true) {
+    var num_frames: usize = 0;
+    var accumulator: i128 = 0;
+    const NUM_FRAMES = 1000;
+
+    while (num_frames < NUM_FRAMES) : (num_frames += 1) {
+        const start = std.time.nanoTimestamp();
         emu.runFrame();
-        // VSync/Timer here soon
+        const end = std.time.nanoTimestamp();
+        accumulator +|= end - start;
     }
+
+    const average_ns = @as(f128, @floatFromInt(accumulator)) / @as(f128, @floatFromInt(NUM_FRAMES));
+    const average_ms = average_ns / 1_000_000.0;
+
+    std.debug.print("Total time to execute {d} frames: {} \n", .{ NUM_FRAMES, std.fmt.fmtDuration(@intCast(accumulator)) });
+    std.debug.print("Average frametime: {d:.3} ms\n", .{average_ms});
 }

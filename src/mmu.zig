@@ -42,11 +42,7 @@ pub const Mmu = struct {
                 hw.Map.io.start...hw.Map.io.end => self.io.write(address, val),
                 hw.Map.hram.start...hw.Map.hram.end => self.hram[address - hw.Map.hram.start] = val,
                 hw.Map.ie_reg => self.interrupts.ie = val,
-                else => {
-                    if (@import("builtin").os.tag != .freestanding) {
-                        std.log.warn("Attempted to write to unimplemented memory region at address {x}", .{address});
-                    }
-                },
+                else => {},
             }
         } else if (T == u16) {
             self.write(address, @as(u8, @truncate(value)), tick);
