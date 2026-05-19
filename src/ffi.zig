@@ -7,14 +7,49 @@ const joypad = @import("joypad");
 
 // Logging
 extern fn js_log_write(ptr: [*]const u8, len: usize) void;
+extern fn js_panic(ptr: [*]const u8, len: usize) void;
 
 pub fn log(msg: []const u8) void {
     js_log_write(msg.ptr, msg.len);
 }
 
-pub fn panic(msg: []const u8, _: ?*std.builtin.StackTrace, _: ?usize) noreturn {
-    log("PANIC: ");
-    log(msg);
+pub fn panic(msg: []const u8, stack_trace: ?*std.builtin.StackTrace, addr: ?usize) noreturn {
+    var buf: [2048]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    const writer = fbs.writer();
+
+    writer.print("--- ZIG CRASH REPORT ---\n", .{}) catch {};
+    
+    // Check if this looks like an assertion failure
+    if (std.mem.indexOf(u8, msg, "assertion failed") != null or std.mem.indexOf(u8, msg, "reached unreachable code") != null) {
+        writer.print("CRITICAL: {s}\n", .{msg}) catch {};
+    } else {
+        writer.print("Message: {s}\n", .{msg}) catch {};
+    }
+    
+    if (addr) |a| {
+        writer.print("Fault Address (WASM): 0x{X}\n", .{a}) catch {};
+    }
+
+    if (emu_instance) |e| {
+        writer.print("\n[Emulator State]\n", .{}) catch {};
+        writer.print("  PC: 0x{X:0>4}\n", .{e.cpu.pc}) catch {};
+        writer.print("  SP: 0x{X:0>4}\n", .{e.cpu.sp}) catch {};
+        writer.print("  Regs: A:{X:0>2} F:{X:0>2} B:{X:0>2} C:{X:0>2} D:{X:0>2} E:{X:0>2} H:{X:0>2} L:{X:0>2}\n", .{
+            e.cpu.a, e.cpu.f, e.cpu.b, e.cpu.c, e.cpu.d, e.cpu.e, e.cpu.h, e.cpu.l,
+        }) catch {};
+        writer.print("  LY: {d}  Mode: {s}\n", .{e.ppu.ly, @tagName(e.ppu.state)}) catch {};
+    }
+
+    if (stack_trace) |st| {
+        writer.print("\n[Stack Trace - Instruction Addresses]\n", .{}) catch {};
+        for (st.instruction_addresses[0..st.index]) |address| {
+            writer.print("  0x{X}\n", .{address}) catch {};
+        }
+    }
+
+    const final_msg = fbs.getWritten();
+    js_panic(final_msg.ptr, final_msg.len);
     @trap();
 }
 

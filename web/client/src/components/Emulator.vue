@@ -142,6 +142,8 @@ canvas {
     background: #fee;
     padding: 0.5rem;
     border-radius: 4px;
+    white-space: pre-wrap;
+    font-family: monospace;
 }
 
 .side-col {

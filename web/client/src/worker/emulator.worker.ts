@@ -32,11 +32,17 @@ self.onmessage = async (e: MessageEvent) => {
                         memory: memory,
                         js_log_write: (ptr: number, len: number) => {
                             if (!memory) return;
-                            // TextDecoder cannot decode directly from SharedArrayBuffer
                             const sharedBuf = new Uint8Array(memory.buffer, ptr, len);
                             const nonSharedBuf = new Uint8Array(sharedBuf); 
                             const str = new TextDecoder().decode(nonSharedBuf);
                             logToMain(str);
+                        },
+                        js_panic: (ptr: number, len: number) => {
+                            if (!memory) return;
+                            const sharedBuf = new Uint8Array(memory.buffer, ptr, len);
+                            const nonSharedBuf = new Uint8Array(sharedBuf); 
+                            const str = new TextDecoder().decode(nonSharedBuf);
+                            panicToMain(str);
                         }
                     }
                 });
@@ -93,7 +99,14 @@ self.onmessage = async (e: MessageEvent) => {
 
         case 'RUN_FRAME':
             if (!wasm || !ctx || !imageData || !memory) return;
-            wasm.run_frame();
+            try {
+                wasm.run_frame();
+            } catch (err: any) {
+                console.error("[WORKER] WASM Trap in run_frame:", err);
+                const stack = err.stack || "No JS stack available";
+                panicToMain(`${err.message}\n\nJS Stack Trace:\n${stack}`);
+                return;
+            }
             
             const ptr = wasm.get_frame_buffer_ptr();
             const source = new Uint8Array(memory.buffer, ptr, 160 * 144 * 4);
@@ -134,7 +147,14 @@ self.onmessage = async (e: MessageEvent) => {
 
         case 'STEP':
             if (!wasm) return;
-            wasm.step();
+            try {
+                wasm.step();
+            } catch (err: any) {
+                console.error("[WORKER] WASM Trap in step:", err);
+                const stack = err.stack || "No JS stack available";
+                panicToMain(`${err.message}\n\nJS Stack Trace:\n${stack}`);
+                return;
+            }
             self.postMessage({ 
                 type: 'STEP_COMPLETE',
                 data: {

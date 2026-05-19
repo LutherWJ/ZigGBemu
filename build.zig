@@ -94,6 +94,7 @@ pub fn build(b: *std.Build) void {
         .target = b.resolveTargetQuery(.{
             .cpu_arch = .wasm32,
             .os_tag = .freestanding,
+            .cpu_model = .{ .explicit = &std.Target.wasm.cpu.generic },
             .cpu_features_add = std.Target.wasm.featureSet(&[_]std.Target.wasm.Feature{ .atomics, .bulk_memory }),
         }),
         .optimize = optimize,

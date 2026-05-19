@@ -34,21 +34,21 @@ pub const Emulator = struct {
         emu._arena = arena;
 
         emu.interrupts = try aa.create(Interrupts);
-        emu.interrupts.* = .{};
-
         emu.sdt = try aa.create(Sdt);
-        emu.sdt.* = .{ .interrupts = emu.interrupts };
-
         emu.ppu = try aa.create(Ppu);
-        emu.ppu.* = .{ .interrupts = emu.interrupts };
-
         emu.timer = try aa.create(Timer);
-        emu.timer.* = .{ .interrupts = emu.interrupts, .sdt = emu.sdt, .ppu = emu.ppu };
-
         emu.joypad = try aa.create(Joypad);
+        emu.io = try aa.create(Io);
+        emu.mbc = try aa.create(Mbc);
+        emu.mmu = try aa.create(Mmu);
+        emu.mbc.* = try Mbc.init(aa, rom);
+        emu.cpu = try aa.create(Cpu);
+
+        emu.interrupts.* = .{};
+        emu.sdt.* = .{ .interrupts = emu.interrupts };
+        emu.timer.* = .{ .interrupts = emu.interrupts, .sdt = emu.sdt, .ppu = emu.ppu };
         emu.joypad.* = .{};
 
-        emu.io = try aa.create(Io);
         emu.io.* = .{
             .timer = emu.timer,
             .joypad = emu.joypad,
@@ -57,10 +57,6 @@ pub const Emulator = struct {
             .ppu = emu.ppu,
         };
 
-        emu.mbc = try aa.create(Mbc);
-        emu.mbc.* = try Mbc.init(aa, rom);
-
-        emu.mmu = try aa.create(Mmu);
         emu.mmu.* = .{
             .interrupts = emu.interrupts,
             .timer = emu.timer,
@@ -69,7 +65,8 @@ pub const Emulator = struct {
             .ppu = emu.ppu,
         };
 
-        emu.cpu = try aa.create(Cpu);
+        emu.ppu.* = .{ .interrupts = emu.interrupts, .mmu = emu.mmu };
+
         emu.cpu.* = .{
             .mmu = emu.mmu,
             .interrupts = emu.interrupts,

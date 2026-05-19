@@ -169,6 +169,7 @@ export function useEmulator(): EmulatorState {
         return;
     }
 
+    error.value = null;
     const buffer = await file.arrayBuffer();
     const romData = new Uint8Array(buffer);
 

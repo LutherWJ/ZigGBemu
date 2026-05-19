@@ -1,5 +1,6 @@
 const std = @import("std");
 const Interrupts = @import("interrupts").Interrupts;
+const Mmu = @import("mmu").Mmu;
 const hw = @import("hw");
 const PixelFifos = @import("pixel_fifo");
 const BackgroundFifo = PixelFifos.BackgroundFifo;
@@ -72,18 +73,18 @@ const Mode3 = struct {
     fetcher_state: PixelFetcherState = .{},
 };
 
-const DmaTransfer = struct {
+const DmaTransferState = struct {
+    is_active: bool = false,
     dots_left: i16 = 640,
-    transfer_base_address: u16,
+    transfer_base_address: u16 = 0,
     address_offset: u16 = 0,
 };
 
-const Mode = enum(u3) {
+const Mode = enum(u2) {
     hblank = 0,
     vblank = 1,
     oam_scan = 2,
     pixel_transfer = 3,
-    dma_transfer = 4,
 };
 
 const ModeContext = union(Mode) {
@@ -91,7 +92,6 @@ const ModeContext = union(Mode) {
     vblank: void,
     oam_scan: void,
     pixel_transfer: struct { discards: u8 },
-    dma_transfer: struct { transfer_base_address: u16 },
 };
 
 const PpuState = union(enum) {
@@ -99,7 +99,6 @@ const PpuState = union(enum) {
     mode1: Mode1,
     mode2: Mode2,
     mode3: Mode3,
-    dma_transfer: DmaTransfer,
 };
 
 const FetcherModes = enum {
@@ -139,6 +138,7 @@ pub const Ppu = struct {
     wx: u8 = 0,
     wy: u8 = 0,
     wlc: u8 = 0, // Window Line control
+    dma_transfer_state: DmaTransferState = .{},
 
     vram: [hw.Map.vram.size]u8 = [_]u8{0} ** hw.Map.vram.size,
     oam: [hw.Map.oam.size]u8 = [_]u8{0} ** hw.Map.oam.size,
@@ -149,6 +149,7 @@ pub const Ppu = struct {
     sprite_fifo: SpriteFifo = .{},
     frame_buf: std.BoundedArray(u32, hw.Lcd.area) = .{},
 
+    mmu: *Mmu,
     interrupts: *Interrupts,
 
     fn setMode(self: *Ppu, context: ModeContext) void {
@@ -189,26 +190,17 @@ pub const Ppu = struct {
                 self.vram_lock = true;
                 self.oam_lock = true;
             },
-            .dma_transfer => |ctx| {
-                self.bg_fifo.clear();
-                self.sprite_fifo.clear();
-                self.stat.ppu_mode = 0;
-                self.vram_lock = false;
-                self.oam_lock = false;
-                self.state = .{ .dma_transfer = .{ .transfer_base_address = ctx.transfer_base_address } };
-                if (self.stat.mode0_sel == 1) self.interrupts.request(.lcd);
-            },
         }
     }
 
     pub fn tick(self: *Ppu) void {
+        self.tickDmaTransfer();
         if (self.lcdc.lcd_enable == 0) return;
         const transition = switch (self.state) {
             .mode0 => |*m| self.tickHBlank(m),
             .mode1 => |*m| self.tickVBlank(m),
             .mode2 => |*m| self.oamScanTick(m),
             .mode3 => |*m| self.tickPixelTransfer(m),
-            .dma_transfer => |*m| self.tickDmaTransfer(m),
         };
 
         if (transition) |ctx| {
@@ -218,8 +210,15 @@ pub const Ppu = struct {
 
     pub fn writeDma(self: *Ppu, value: u8) void {
         self.dma = value;
-        const transfer_base_address = @as(u16, value) << 8;
-        self.setMode(.{ .dma_transfer = .{ .transfer_base_address = transfer_base_address } });
+        const address: u16 = @as(u16, value) << 8;
+
+        // Check for invalid transfer areas for accuracy
+        if (address < hw.Map.hram.start and hw.Map.hram.end < address) return;
+        if (address < hw.Map.oam.start and hw.Map.oam.end < address) return;
+
+        self.dma_transfer_state.is_active = true;
+        self.dma_transfer_state.transfer_base_address = address;
+        self.oam_lock = true;
     }
 
     pub fn writeVram(self: *Ppu, address: u16, value: u8) void {
@@ -305,7 +304,7 @@ pub const Ppu = struct {
                 const obj = self.oam_buf.get(fetcher_state.focused_obj_idx.?);
                 const true_y: i32 = @as(i32, obj.y_pos) - 16;
                 const current_line: i32 = @as(i32, self.ly);
-                std.debug.assert((current_line - true_y) > 0);
+                std.debug.assert((current_line - true_y) >= 0);
                 const signed_row: i16 = @truncate(current_line - true_y);
                 var sprite_row: u16 = @as(u16, @bitCast(signed_row));
 
@@ -403,7 +402,7 @@ pub const Ppu = struct {
     // to focus in the oam_buf. Multiple sprites can have the same coordinates so we need
     // to be extremely careful to not fetch the same sprite more than once.
     fn checkForSprite(self: *Ppu, fetcher_state: *PixelFetcherState) void {
-        if (fetcher_state.mode == .first_tick_sprt) return;
+        if (fetcher_state.mode == .first_tick_sprt or fetcher_state.mode == .second_tick_sprt) return;
         const obj_idx = fetcher_state.focused_obj_idx;
         for (0..self.oam_buf.len) |i| {
             const obj = self.oam_buf.get(i);
@@ -413,6 +412,7 @@ pub const Ppu = struct {
                 fetcher_state.focused_obj_idx = @intCast(i);
                 fetcher_state.suspended_mode = fetcher_state.mode;
                 fetcher_state.mode = .first_tick_sprt;
+                return;
             }
         }
     }
@@ -423,9 +423,8 @@ pub const Ppu = struct {
 
         // Multiplexer!
         for (0..4) |_| {
-            const mode = mode3.fetcher_state.mode;
             self.checkForSprite(&mode3.fetcher_state);
-            if (mode == .first_tick_sprt or mode == .second_tick_sprt) {
+            if (mode3.fetcher_state.mode == .first_tick_sprt or mode3.fetcher_state.mode == .second_tick_sprt) {
                 return null;
             }
 
@@ -524,15 +523,24 @@ pub const Ppu = struct {
         return null;
     }
 
-    fn tickDmaTransfer(self: *Ppu, dma_transfer_state: *DmaTransfer) ?ModeContext {
-        dma_transfer_state.dots_left -= 4;
+    fn tickDmaTransfer(self: *Ppu) void {
+        if (!self.dma_transfer_state.is_active) return;
+        self.dma_transfer_state.dots_left -= 4;
 
-        _ = self;
+        const read_address = self.dma_transfer_state.transfer_base_address + self.dma_transfer_state.address_offset;
+        const value = self.mmu.read(read_address, u8, false);
 
-        if (dma_transfer_state.dots_left == 0) {
-            return .oam_scan;
+        const write_address = self.dma_transfer_state.address_offset;
+        self.oam[write_address] = value;
+
+        self.dma_transfer_state.address_offset += 1;
+
+        if (self.dma_transfer_state.dots_left == 0) {
+            self.dma_transfer_state = .{};
+            if (self.stat.ppu_mode == 0 or self.stat.ppu_mode == 1) {
+                self.oam_lock = false;
+            }
         }
-        return null;
     }
 
     fn drawPixel(self: *Ppu, pixel: u2, pallete: u8) void {
