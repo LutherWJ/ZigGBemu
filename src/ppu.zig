@@ -116,7 +116,8 @@ const PixelFetcherState = struct {
     // we use an enum to represent the first and second cycles.
     mode: FetcherModes = .first_tick_bg,
     suspended_mode: FetcherModes = .first_tick_bg,
-    pix_address: u16 = 0, // Base address of pixels being fetched.
+    bg_pix_address: u16 = 0, // Base address of bg pixels being fetched.
+    sprite_pix_address: u16 = 0, // same shit different shoe
     focused_obj_idx: ?u8 = 0, // Multiplexer sets this value when it discovers a sprite needs to be rendered.
     x_offset: u8 = 0,
     fetcher_x: u8 = 0,
@@ -286,14 +287,14 @@ pub const Ppu = struct {
                 // Calculate tile address
                 const tile_base_address = self.getTileBaseAddress(tile_id);
                 const row_offset = @as(u16, (map_y % 8) * 2);
-                fetcher_state.pix_address = tile_base_address + row_offset - hw.Map.vram.start;
+                fetcher_state.bg_pix_address = tile_base_address + row_offset - hw.Map.vram.start;
 
                 // Don't bother reading the address since nothing gets pushed to the fifos until next tick
                 fetcher_state.mode = .second_tick_bg;
             },
             .second_tick_bg => {
-                const byte1 = self.vram[fetcher_state.pix_address];
-                const byte2 = self.vram[fetcher_state.pix_address + 1];
+                const byte1 = self.vram[fetcher_state.bg_pix_address];
+                const byte2 = self.vram[fetcher_state.bg_pix_address + 1];
                 const pixels = interleaveBytes(byte1, byte2);
                 self.bg_fifo.pushRow(pixels) catch return;
                 fetcher_state.fetcher_x +%= 8;
@@ -306,6 +307,7 @@ pub const Ppu = struct {
                 const current_line: i32 = @as(i32, self.ly);
                 std.debug.assert((current_line - true_y) >= 0);
                 const signed_row: i16 = @truncate(current_line - true_y);
+
                 var sprite_row: u16 = @as(u16, @bitCast(signed_row));
 
                 // Check if its flipped and recalculate
@@ -314,21 +316,24 @@ pub const Ppu = struct {
                 if (y_flip) sprite_row ^= (sprite_height - 1);
 
                 // Find the pixel address
-                const base_address = self.getTileBaseAddress(obj.tile_id);
-                fetcher_state.pix_address = base_address + (sprite_row * 2) - hw.Map.vram.start;
+                const tile_id = if (self.lcdc.obj_size == 1) obj.tile_id & 0xFE else obj.tile_id;
+                const base_address = 0x8000 +% (@as(u16, tile_id) * 16);
+                fetcher_state.sprite_pix_address = base_address + (sprite_row * 2) - hw.Map.vram.start;
 
                 fetcher_state.mode = .second_tick_sprt;
             },
             .second_tick_sprt => {
-                const byte1 = self.vram[fetcher_state.pix_address];
-                const byte2 = self.vram[fetcher_state.pix_address + 1];
+                const byte1 = self.vram[fetcher_state.sprite_pix_address];
+                const byte2 = self.vram[fetcher_state.sprite_pix_address + 1];
                 const pixels = interleaveBytes(byte1, byte2);
 
                 const obj = self.oam_buf.get(fetcher_state.focused_obj_idx.?);
+                const x_flip = obj.flags.x_flip == 1;
+
                 var sprite_pixels: [8]SpritePixel = undefined;
                 for (0..8) |i| {
-                    const offset: u4 = @truncate(i * 2);
-                    const pixel: u2 = @truncate(pixels >> offset);
+                    const shift: u4 = if (x_flip) @truncate(i * 2) else @truncate((7 - i) * 2);
+                    const pixel: u2 = @truncate(pixels >> shift);
                     sprite_pixels[i] = .{
                         .pixel = pixel,
                         .x_pos = obj.x_pos,
@@ -354,13 +359,13 @@ pub const Ppu = struct {
                 // Calculate tile address
                 const tile_base_address: u16 = self.getTileBaseAddress(tile_id);
                 const row_offset: u16 = @as(u16, (self.wlc % 8) * 2);
-                fetcher_state.pix_address = tile_base_address + row_offset - hw.Map.vram.start;
+                fetcher_state.bg_pix_address = tile_base_address + row_offset - hw.Map.vram.start;
 
                 fetcher_state.mode = .second_tick_win;
             },
             .second_tick_win => {
-                const byte1 = self.vram[fetcher_state.pix_address];
-                const byte2 = self.vram[fetcher_state.pix_address + 1];
+                const byte1 = self.vram[fetcher_state.bg_pix_address];
+                const byte2 = self.vram[fetcher_state.bg_pix_address + 1];
                 const pixels = interleaveBytes(byte1, byte2);
                 self.bg_fifo.pushRow(pixels) catch return;
                 fetcher_state.win_tile_x += 1;

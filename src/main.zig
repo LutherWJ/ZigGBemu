@@ -14,7 +14,7 @@ pub fn main() !void {
 }
 
 fn testRom(allocator: std.mem.Allocator) !void {
-    const rom_path = "/home/luther/Downloads/Tetris (Japan) (En)/Tetris (Japan) (En).gb";
+    const rom_path = "/home/luther/Downloads/Legend of Zelda, The - Link's Awakening (USA, Europe) (Rev 2)/Legend of Zelda, The - Link's Awakening (USA, Europe) (Rev 2).gb";
 
     const file = try std.fs.cwd().openFile(rom_path, .{});
     defer file.close();

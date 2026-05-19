@@ -3,6 +3,7 @@ const hw = @import("hw");
 pub const Mbc1 = struct {
     rom: []const u8,
     ram: []u8,
+    dirty: bool = false,
 
     // All registers are initialized 0
     ram_enabled: bool = false,
@@ -92,6 +93,7 @@ pub const Mbc1 = struct {
     fn writeRam(self: *Mbc1, address: u16, value: u8) void {
         if (!self.ram_enabled or self.ram.len == 0) return;
 
+        self.dirty = true;
         if (self.rom_bank_mode) {
             self.ram[address - hw.Map.ext_ram.start] = value;
         } else {

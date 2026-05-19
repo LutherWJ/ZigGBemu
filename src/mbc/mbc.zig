@@ -41,4 +41,32 @@ pub const Mbc = union(enum) {
             .mbc1 => |*m| m.write(address, value),
         }
     }
+
+    pub fn isDirty(self: *const Mbc) bool {
+        return switch (self.*) {
+            .mbc0 => false,
+            .mbc1 => |*m| m.dirty,
+        };
+    }
+
+    pub fn clearDirty(self: *Mbc) void {
+        switch (self.*) {
+            .mbc0 => {},
+            .mbc1 => |*m| m.dirty = false,
+        }
+    }
+
+    pub fn getRamPtr(self: *Mbc) ?[*]u8 {
+        return switch (self.*) {
+            .mbc0 => null,
+            .mbc1 => |*m| if (m.ram.len > 0) m.ram.ptr else null,
+        };
+    }
+
+    pub fn getRamSize(self: *Mbc) usize {
+        return switch (self.*) {
+            .mbc0 => 0,
+            .mbc1 => |*m| m.ram.len,
+        };
+    }
 };

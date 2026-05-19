@@ -226,6 +226,20 @@ export fn get_oam_ptr() [*]u8 {
     return if (emu_instance) |e| @ptrCast(&e.ppu.oam) else undefined;
 }
 
+// SRAM Management
+export fn get_sram_ptr() ?[*]u8 {
+    return if (emu_instance) |e| e.mmu.mbc.getRamPtr() else null;
+}
+export fn get_sram_size() usize {
+    return if (emu_instance) |e| e.mmu.mbc.getRamSize() else 0;
+}
+export fn is_sram_dirty() bool {
+    return if (emu_instance) |e| e.mmu.mbc.isDirty() else false;
+}
+export fn clear_sram_dirty() void {
+    if (emu_instance) |e| e.mmu.mbc.clearDirty();
+}
+
 // Whatever else
 export fn ping() void {
     log("PONG: Connection to Zig confirmed.");

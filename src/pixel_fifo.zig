@@ -51,14 +51,14 @@ pub const SpriteFifo = struct {
             const ring_idx = self.head +% @as(u3, @intCast(i));
             const old_pixel = self.buffer[ring_idx];
 
-            if (new_pixel.pixel == 0) continue;
-
             if (i >= self.count) {
                 self.buffer[ring_idx] = new_pixel;
                 continue;
             }
 
-            if (new_pixel.x_pos < old_pixel.x_pos) {
+            if (new_pixel.pixel == 0) continue;
+
+            if (old_pixel.pixel == 0 or new_pixel.x_pos < old_pixel.x_pos) {
                 self.buffer[ring_idx] = new_pixel;
             } else if (new_pixel.x_pos == old_pixel.x_pos) {
                 if (new_pixel.oam_idx < old_pixel.oam_idx) {
