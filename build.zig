@@ -2,7 +2,7 @@ const std = @import("std");
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{ .preferred_optimize_mode = .Debug });
+    const optimize = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseFast });
 
     // 1. Define Internal Modules
     const ModuleDef = struct { name: []const u8, path: []const u8, mod: *std.Build.Module = undefined };
@@ -22,6 +22,7 @@ pub fn build(b: *std.Build) void {
         .{ .name = "ppu", .path = "src/ppu.zig" },
         .{ .name = "emulator", .path = "src/emulator.zig" },
         .{ .name = "pixel_fifo", .path = "src/pixel_fifo.zig" },
+        .{ .name = "yogurt_array", .path = "src/yogurt_array.zig" },
     };
 
     // 2. Initialize and Link Modules

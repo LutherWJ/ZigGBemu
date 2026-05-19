@@ -3,6 +3,7 @@ const Interrupts = @import("interrupts").Interrupts;
 const Mmu = @import("mmu").Mmu;
 const hw = @import("hw");
 const PixelFifos = @import("pixel_fifo");
+const YogurtArray = @import("yogurt_array").YogurtArray;
 const BackgroundFifo = PixelFifos.BackgroundFifo;
 const SpriteFifo = PixelFifos.SpriteFifo;
 const writeInt = std.mem.writeInt;
@@ -145,10 +146,10 @@ pub const Ppu = struct {
     oam: [hw.Map.oam.size]u8 = [_]u8{0} ** hw.Map.oam.size,
     vram_lock: bool = false,
     oam_lock: bool = false,
-    oam_buf: std.BoundedArray(Object, 10) = .{},
+    oam_buf: YogurtArray(Object, 10) = .{},
     bg_fifo: BackgroundFifo = .{},
     sprite_fifo: SpriteFifo = .{},
-    frame_buf: std.BoundedArray(u32, hw.Lcd.area) = .{},
+    frame_buf: YogurtArray(u32, hw.Lcd.area) = .{},
 
     mmu: *Mmu,
     interrupts: *Interrupts,
