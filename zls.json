@@ -1,5 +1,13 @@
 {
     "$schema": "https://raw.githubusercontent.com/zigtools/zls/main/schemas/zls.schema.json",
     "enable_build_on_save": true,
-    "build_on_save_step": "install"
+    "build_on_save_step": "install",
+    "zig_exe_path": "/usr/bin/zig",
+    "zig_lib_path": "/usr/lib/zig0.14/lib",
+    "enable_autofix": true,
+    "enable_snippets": true,
+    "enable_ast_check_diagnostics": true,
+    "enable_import_embed_file_argument_completions": true,
+    "warn_style": true,
+    "enable_build_runner": true
 }

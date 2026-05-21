@@ -20,6 +20,7 @@ pub fn build(b: *std.Build) void {
         .{ .name = "interrupts", .path = "src/interrupts.zig" },
         .{ .name = "sdt", .path = "src/sdt.zig" },
         .{ .name = "ppu", .path = "src/ppu.zig" },
+        .{ .name = "apu", .path = "src/apu.zig" },
         .{ .name = "emulator", .path = "src/emulator.zig" },
         .{ .name = "pixel_fifo", .path = "src/pixel_fifo.zig" },
         .{ .name = "yogurt_array", .path = "src/yogurt_array.zig" },

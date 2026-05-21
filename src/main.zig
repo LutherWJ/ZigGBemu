@@ -15,10 +15,10 @@ pub fn main() !void {
     }
     const allocator = gpa.allocator();
 
-    try testRom(allocator);
+    try test_rom(allocator);
 }
 
-fn testRom(allocator: std.mem.Allocator) !void {
+fn test_rom(allocator: std.mem.Allocator) !void {
     const rom_path = "/home/luther/Downloads/Legend of Zelda, The - Link's Awakening (USA, Europe) (Rev 2)/Legend of Zelda, The - Link's Awakening (USA, Europe) (Rev 2).gb";
 
     const file = try std.fs.cwd().openFile(rom_path, .{});
@@ -37,7 +37,7 @@ fn testRom(allocator: std.mem.Allocator) !void {
 
     var num_frames: usize = 0;
     var accumulator: i128 = 0;
-    const NUM_FRAMES = 1000;
+    const NUM_FRAMES = 10000;
 
     while (num_frames < NUM_FRAMES) : (num_frames += 1) {
         const start = std.time.nanoTimestamp();

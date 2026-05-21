@@ -13,7 +13,6 @@ pub const Interrupts = struct {
     ifr: u8 = 0,
 
     pub fn request(self: *Interrupts, interrupt: InterruptBit) void {
-        // std.debug.print("[INT] Request: {s}\n", .{@tagName(interrupt)});
         self.ifr |= (@as(u8, 1) << @intFromEnum(interrupt));
     }
 
@@ -27,14 +26,9 @@ pub const Interrupts = struct {
     }
 
     pub fn getPending(self: *const Interrupts) ?InterruptBit {
-        const pending = self.ie & self.ifr;
-
-        if (pending & 0b00001 != 0) return .vblank;
-        if (pending & 0b00010 != 0) return .lcd;
-        if (pending & 0b00100 != 0) return .timer;
-        if (pending & 0b01000 != 0) return .serial;
-        if (pending & 0b10000 != 0) return .joypad;
-
-        return null;
+        const pending = self.ie & self.ifr & 0x1F;
+        if (pending == 0) return null;
+        // Find and return the first set bit
+        return @enumFromInt(@as(u3, @truncate(@ctz(pending))));
     }
 };

@@ -72,6 +72,11 @@ pub const Map = struct {
         pub const end: u16 = 0xFFFE;
         pub const size: usize = end - start + 1;
     };
+    pub const wave_ram = struct {
+        pub const start: u16 = 0xFF30;
+        pub const end: u16 = 0xFF3F;
+        pub const size: usize = end - start + 1;
+    };
     pub const ie_reg = 0xFFFF;
 };
 

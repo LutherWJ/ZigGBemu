@@ -6,6 +6,7 @@ const hw = @import("hw");
 const Interrupts = @import("interrupts").Interrupts;
 const Sdt = @import("sdt").Sdt;
 const Ppu = @import("ppu").Ppu;
+const Apu = @import("apu").Apu;
 
 pub const Io = struct {
     timer: *Timer,
@@ -56,7 +57,7 @@ pub const Io = struct {
             hw.Io.stat => self.ppu.stat = @bitCast(value),
             hw.Io.scy => self.ppu.scy = value,
             hw.Io.scx => self.ppu.scx = value,
-            hw.Io.ly => {},
+            hw.Io.ly => {}, // Read only
             hw.Io.lyc => self.ppu.lyc = value,
             hw.Io.dma => self.ppu.writeDma(value),
             hw.Io.bgp => self.ppu.bgp = value,
